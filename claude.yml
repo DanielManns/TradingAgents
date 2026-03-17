@@ -1,0 +1,48 @@
+version: 1
+
+# Review trigger settings
+review:
+  auto_review: true       # Automatically review new PRs
+  auto_review_delay: 0    # Review immediately (seconds)
+
+# Review instructions tailored to this repo
+instructions:
+  - type: always
+    text: |
+      This is a Python multi-agent trading framework built on LangGraph.
+      The codebase has specialized LLM-powered agents (analysts, researchers,
+      traders, risk managers) that collaborate to make trading decisions.
+
+      When reviewing, focus on:
+
+      **Code Quality (Python)**
+      - PEP 8 compliance and type annotations on all function signatures
+      - Prefer immutable data structures (frozen dataclasses, NamedTuple)
+      - Ensure imports are properly organized (isort-compatible)
+
+      **Security (Critical for this project)**
+      - API keys must NEVER be hardcoded — must use os.environ or dotenv
+      - Watch for secrets in: .env files, config dicts, LLM client constructors
+      - Flag any credential exposure across OpenAI, Anthropic, Google, xAI, OpenRouter keys
+      - No sensitive data in log statements or debug output
+
+      **LangGraph / Agent Architecture**
+      - Verify correct state management in agent graph nodes
+      - Check for proper error handling in LLM API calls (retries, timeouts, rate limits)
+      - Ensure agent state schemas are consistent across the graph
+      - Watch for blocking calls that could stall the agent pipeline
+
+      **Data Integrity**
+      - Validate financial data from yfinance/Alpha Vantage before processing
+      - Check for proper handling of missing market data, weekends, holidays
+      - Ensure pandas operations handle edge cases (empty DataFrames, NaN values)
+
+      **Testing**
+      - New features should include pytest tests
+      - Tests should use pytest.mark (unit, integration) for categorization
+      - Flag PRs that modify core logic without corresponding test changes
+
+      **Do NOT focus on:**
+      - Minor style nitpicks already caught by black/ruff
+      - Adding docstrings to unchanged code
+      - Suggesting refactors beyond the scope of the PR
