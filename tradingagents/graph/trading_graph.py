@@ -190,7 +190,9 @@ class TradingAgentsGraph:
 
         # Initialize state
         init_agent_state = self.propagator.create_initial_state(
-            company_name, trade_date
+            company_name,
+            trade_date,
+            analysis_period=self.config.get("analysis_period", "past month"),
         )
         args = self.propagator.get_graph_args()
 
