@@ -1247,6 +1247,76 @@ def pick(
 
 
 @app.command()
+def status():
+    """Zeigt aktuellen Portfolio-Stand mit Performance vs. SPY-Benchmark."""
+    from rich.table import Table
+    from tradingagents.portfolio.persistence import load_picks
+    from tradingagents.portfolio.status import PortfolioStatus
+
+    picks_payload = load_picks()
+    if picks_payload is None:
+        console.print("[red]Kein Portfolio gefunden. Bitte zuerst `tradingagents pick` ausführen.[/red]")
+        raise typer.Exit(code=1)
+
+    import yfinance as yf
+
+    def _fetch_price(ticker: str, date: str | None = None) -> float | None:
+        try:
+            t = yf.Ticker(ticker)
+            if date:
+                import pandas as pd
+                start = pd.Timestamp(date)
+                end = start + pd.Timedelta(days=5)
+                hist = t.history(start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"))
+                if hist.empty:
+                    return None
+                return float(hist["Close"].iloc[0])
+            else:
+                hist = t.history(period="1d")
+                if hist.empty:
+                    return None
+                return float(hist["Close"].iloc[-1])
+        except Exception:
+            return None
+
+    ps = PortfolioStatus(price_fetcher=_fetch_price)
+
+    with console.status("[bold blue]Lade aktuelle Kurse...[/bold blue]"):
+        entries = ps.build(picks_payload)
+        avg_pct = ps.portfolio_avg_pct(entries)
+        spy_pct = ps.spy_pct_change(pick_date=picks_payload["date"], price_fetcher=_fetch_price)
+
+    pick_date = picks_payload["date"]
+    table = Table(title=f"Portfolio-Status (seit {pick_date})", box=box.ROUNDED)
+    table.add_column("Ticker", style="bold cyan", width=8)
+    table.add_column("Signal", width=6)
+    table.add_column("Kurs bei Pick", justify="right", width=14)
+    table.add_column("Aktueller Kurs", justify="right", width=14)
+    table.add_column("Performance", justify="right", width=12)
+
+    for entry in sorted(entries, key=lambda e: -e.pct_change):
+        color = "green" if entry.pct_change >= 0 else "red"
+        table.add_row(
+            entry.ticker,
+            entry.signal,
+            f"${entry.price_at_pick:.2f}",
+            f"${entry.current_price:.2f}",
+            f"[{color}]{entry.pct_change:+.1f}%[/{color}]",
+        )
+
+    console.print(table)
+
+    avg_color = "green" if avg_pct >= 0 else "red"
+    console.print(f"\nPortfolio Ø Performance: [{avg_color}]{avg_pct:+.1f}%[/{avg_color}]")
+    if spy_pct is not None:
+        spy_color = "green" if spy_pct >= 0 else "red"
+        console.print(f"SPY Benchmark:           [{spy_color}]{spy_pct:+.1f}%[/{spy_color}]")
+        diff = avg_pct - spy_pct
+        diff_color = "green" if diff >= 0 else "red"
+        console.print(f"Alpha vs. SPY:           [{diff_color}]{diff:+.1f}%[/{diff_color}]")
+
+
+@app.command()
 def rebalance(
     date: Optional[str] = typer.Option(None, "--date", "-d", help="Analyse-Datum (YYYY-MM-DD). Standard: heute."),
     min_improvement: float = typer.Option(0.3, "--min-improvement", help="Mindest-Score-Verbesserung für einen Tausch."),
