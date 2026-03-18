@@ -34,4 +34,8 @@ DEFAULT_CONFIG = {
     "tool_vendors": {
         # Example: "get_stock_data": "alpha_vantage",  # Override category default
     },
+    # Portfolio batch settings
+    "cache_ttl_days": 7,           # Tage bis Cache-Einträge ablaufen
+    "batch_delay_seconds": 1.0,    # Pause zwischen propagate()-Calls (Rate Limiting)
+    "max_batch_budget_usd": None,  # Optional: Budget-Cap in USD (None = unbegrenzt)
 }
