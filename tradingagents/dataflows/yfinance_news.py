@@ -104,7 +104,7 @@ def get_news_yfinance(
 
 def get_global_news_yfinance(
     curr_date: str,
-    look_back_days: int = 7,
+    look_back_days: int = None,
     limit: int = 10,
 ) -> str:
     """
@@ -118,6 +118,10 @@ def get_global_news_yfinance(
     Returns:
         Formatted string containing global news articles
     """
+    if look_back_days is None:
+        from tradingagents.dataflows.config import get_config
+        look_back_days = get_config().get("news_lookback_days", 30)
+
     # Search queries for macro/global news
     search_queries = [
         "stock market economy",

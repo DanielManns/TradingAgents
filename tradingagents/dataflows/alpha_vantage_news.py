@@ -22,20 +22,24 @@ def get_news(ticker, start_date, end_date) -> dict[str, str] | str:
 
     return _make_api_request("NEWS_SENTIMENT", params)
 
-def get_global_news(curr_date, look_back_days: int = 7, limit: int = 50) -> dict[str, str] | str:
+def get_global_news(curr_date, look_back_days: int = None, limit: int = 50) -> dict[str, str] | str:
     """Returns global market news & sentiment data without ticker-specific filtering.
 
     Covers broad market topics like financial markets, economy, and more.
 
     Args:
         curr_date: Current date in yyyy-mm-dd format.
-        look_back_days: Number of days to look back (default 7).
+        look_back_days: Number of days to look back (default from config, 30).
         limit: Maximum number of articles (default 50).
 
     Returns:
         Dictionary containing global news sentiment data or JSON string.
     """
     from datetime import datetime, timedelta
+
+    if look_back_days is None:
+        from tradingagents.dataflows.config import get_config
+        look_back_days = get_config().get("news_lookback_days", 30)
 
     # Calculate start date
     curr_dt = datetime.strptime(curr_date, "%Y-%m-%d")
