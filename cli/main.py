@@ -1246,5 +1246,124 @@ def pick(
     console.print(f"\n[green]✓ Ergebnis gespeichert:[/green] {output_path}")
 
 
+@app.command()
+def rebalance(
+    date: Optional[str] = typer.Option(None, "--date", "-d", help="Analyse-Datum (YYYY-MM-DD). Standard: heute."),
+    min_improvement: float = typer.Option(0.3, "--min-improvement", help="Mindest-Score-Verbesserung für einen Tausch."),
+    top_n: int = typer.Option(10, "--top", "-n", help="Portfolio-Größe (Anzahl Aktien)."),
+    delay: float = typer.Option(1.0, "--delay", help="Wartezeit in Sekunden zwischen Analysen."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Kein LLM-Call, Mock-Signale für Tests."),
+):
+    """Lädt vorherige Picks, analysiert alle Kandidaten neu und empfiehlt HOLD/SELL/BUY."""
+    import datetime as dt
+    from rich.table import Table
+    from tradingagents.portfolio.universe import UNIVERSE
+    from tradingagents.portfolio.batch_runner import BatchRunner
+    from tradingagents.portfolio.persistence import save_picks, load_picks, archive_picks
+    from tradingagents.portfolio.rebalancer import Rebalancer, RebalanceAction
+    from tradingagents.portfolio.scorer import KeywordScorer
+
+    # Vorherige Picks laden
+    previous = load_picks()
+    if previous is None:
+        console.print("[red]Kein Portfolio gefunden. Bitte zuerst `tradingagents pick` ausführen.[/red]")
+        raise typer.Exit(code=1)
+
+    raw_date = date or dt.date.today().isoformat()
+    try:
+        dt.date.fromisoformat(raw_date)
+    except ValueError:
+        raise typer.BadParameter(f"Ungültiges Datum '{raw_date}'. Erwartet: YYYY-MM-DD")
+    analysis_date = raw_date
+
+    old_picks = previous["picks"]
+    old_date = previous["date"]
+    held_tickers = [p["ticker"] for p in old_picks]
+    # Alle zu analysierenden Ticker: aktuelle Holdings + Universe-Kandidaten (dedupliziert)
+    all_tickers = list(dict.fromkeys(held_tickers + UNIVERSE))
+
+    console.print(f"\n[bold cyan]TradingAgents Rebalance[/bold cyan] — Datum: [yellow]{analysis_date}[/yellow]")
+    console.print(f"Vorheriges Portfolio vom [yellow]{old_date}[/yellow]: {', '.join(held_tickers)}")
+    console.print(f"Analysiere {len(all_tickers)} Ticker...\n")
+
+    if dry_run:
+        import random
+
+        def _mock_propagate(ticker: str, trade_date: str):
+            signals = ["BUY", "HOLD", "SELL"]
+            signal = random.choice(signals)
+            return {"final_trade_decision": f"Mock-Analyse für {ticker}: {signal}"}, signal
+
+        propagate_fn = _mock_propagate
+        delay = 0.0
+    else:
+        config = DEFAULT_CONFIG.copy()
+        graph = TradingAgentsGraph(config=config)
+
+        def propagate_fn(ticker: str, trade_date: str):
+            return graph.propagate(ticker, trade_date)
+
+    scorer = KeywordScorer()
+    runner = BatchRunner(propagate_fn=propagate_fn, scorer=scorer, delay_seconds=delay)
+    results = runner.run(all_tickers, analysis_date)
+
+    new_scores = {r.ticker: r.score for r in results}
+    new_decision_texts = {r.ticker: r.decision_text for r in results}
+    new_signals = {r.ticker: r.signal for r in results}
+
+    rebalancer = Rebalancer(min_improvement=min_improvement)
+    actions = rebalancer.compute(old_picks, new_scores, top_n=top_n)
+
+    # Tabelle anzeigen
+    table = Table(title=f"Rebalance-Plan — {analysis_date}", box=box.ROUNDED)
+    table.add_column("Aktion", width=6)
+    table.add_column("Ticker", style="bold cyan", width=8)
+    table.add_column("Signal", width=6)
+    table.add_column("Alter Score", justify="right", width=11)
+    table.add_column("Neuer Score", justify="right", width=11)
+
+    action_styles = {
+        RebalanceAction.HOLD: "yellow",
+        RebalanceAction.SELL: "red",
+        RebalanceAction.BUY: "green",
+    }
+    signal_styles = {"BUY": "green", "SELL": "red", "HOLD": "yellow"}
+
+    for ra in sorted(actions, key=lambda r: r.action.value):
+        style = action_styles[ra.action]
+        sig = new_signals.get(ra.ticker, "—")
+        sig_style = signal_styles.get(sig, "white")
+        table.add_row(
+            f"[{style}]{ra.action.value}[/{style}]",
+            ra.ticker,
+            f"[{sig_style}]{sig}[/{sig_style}]",
+            f"{ra.old_score:+.1f}" if ra.action != RebalanceAction.BUY else "—",
+            f"{ra.new_score:+.1f}",
+        )
+
+    console.print(table)
+
+    # Neuen State aus HOLD+BUY zusammenstellen und speichern
+    from tradingagents.portfolio.batch_runner import PickResult
+    from tradingagents.portfolio.rebalancer import RebalanceAction as RA
+
+    new_picks = [
+        PickResult(
+            ticker=ra.ticker,
+            score=ra.new_score,
+            signal=new_signals.get(ra.ticker, "HOLD"),
+            decision_text=new_decision_texts.get(ra.ticker, ""),
+        )
+        for ra in actions
+        if ra.action in (RA.HOLD, RA.BUY)
+    ]
+
+    # Alten State archivieren, neuen speichern
+    archive_picks(date=old_date)
+    out_path = save_picks(new_picks, date=analysis_date)
+    console.print(f"\n[green]✓ Neues Portfolio gespeichert:[/green] {out_path}")
+    console.print(f"[dim]Alter State archiviert als:[/dim] portfolio_data/history/{old_date}.json")
+
+
 if __name__ == "__main__":
     app()

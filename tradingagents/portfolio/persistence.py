@@ -44,3 +44,15 @@ def load_picks(output_dir: str = "portfolio_data") -> dict | None:
     if not file_path.exists():
         return None
     return json.loads(file_path.read_text())
+
+
+def archive_picks(date: str, output_dir: str = "portfolio_data") -> Path | None:
+    """Archiviert latest_picks.json als history/YYYY-MM-DD.json. Löscht latest_picks nicht."""
+    latest = Path(output_dir) / PICKS_FILENAME
+    if not latest.exists():
+        return None
+    history_dir = Path(output_dir) / "history"
+    history_dir.mkdir(parents=True, exist_ok=True)
+    archive_file = history_dir / f"{date}.json"
+    archive_file.write_text(latest.read_text())
+    return archive_file
