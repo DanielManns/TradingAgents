@@ -23,12 +23,19 @@ from rich import box
 from rich.align import Align
 from rich.rule import Rule
 
+import random
+
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.portfolio.universe import UNIVERSE
+from tradingagents.portfolio.batch_runner import BatchRunner
+from tradingagents.portfolio.persistence import save_picks
 from cli.models import AnalystType
 from cli.utils import *
 from cli.announcements import fetch_announcements, display_announcements
 from cli.stats_handler import StatsCallbackHandler
+
+SIGNAL_STYLES: dict[str, str] = {"BUY": "green", "SELL": "red", "HOLD": "yellow"}
 
 console = Console()
 
@@ -1172,52 +1179,16 @@ def analyze():
     run_analysis()
 
 
-@app.command()
-def pick(
-    date: Optional[str] = typer.Option(None, "--date", "-d", help="Analyse-Datum (YYYY-MM-DD). Standard: heute."),
-    top_n: int = typer.Option(10, "--top", "-n", help="Anzahl Top-Aktien die ausgewählt werden."),
-    delay: float = typer.Option(1.0, "--delay", help="Wartezeit in Sekunden zwischen Analysen."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Kein LLM-Call, Mock-Signale für Tests."),
-):
-    """Analysiert ~30 S&P 500 Aktien und wählt die Top-N mit dem stärksten Signal aus."""
-    import datetime as dt
-    from rich.table import Table
-    from tradingagents.portfolio.universe import UNIVERSE
-    from tradingagents.portfolio.batch_runner import BatchRunner
-    from tradingagents.portfolio.persistence import save_picks
+def _make_mock_propagate_fn():
+    """Erstellt eine Mock-propagate-Funktion für --dry-run."""
+    def _mock_propagate(ticker: str, trade_date: str):
+        signal = random.choice(["BUY", "HOLD", "SELL"])
+        return {"final_trade_decision": f"Mock-Analyse für {ticker}: {signal}"}, signal
+    return _mock_propagate
 
-    raw_date = date or dt.date.today().isoformat()
-    try:
-        dt.date.fromisoformat(raw_date)
-    except ValueError:
-        raise typer.BadParameter(f"Ungültiges Datum '{raw_date}'. Erwartet: YYYY-MM-DD")
-    analysis_date = raw_date
 
-    console.print(f"\n[bold cyan]TradingAgents Pick[/bold cyan] — Datum: [yellow]{analysis_date}[/yellow]")
-    console.print(f"Analysiere {len(UNIVERSE)} Aktien, wähle Top {top_n} aus...\n")
-
-    if dry_run:
-        import random
-
-        def _mock_propagate(ticker: str, trade_date: str):
-            signals = ["BUY", "HOLD", "SELL"]
-            signal = random.choice(signals)
-            return {"final_trade_decision": f"Mock-Analyse für {ticker}: {signal}"}, signal
-
-        propagate_fn = _mock_propagate
-        delay = 0.0
-    else:
-        config = DEFAULT_CONFIG.copy()
-        graph = TradingAgentsGraph(config=config)
-
-        def propagate_fn(ticker: str, trade_date: str):
-            return graph.propagate(ticker, trade_date)
-
-    runner = BatchRunner(propagate_fn=propagate_fn, delay_seconds=delay)
-    results = runner.run(UNIVERSE, analysis_date)
-    top_picks = results[:top_n]
-
-    # Ergebnis anzeigen
+def _build_picks_table(top_picks, top_n: int, analysis_date: str) -> Table:
+    """Erstellt eine Rich-Tabelle aus den Top-Picks."""
     table = Table(title=f"Top {top_n} Aktien — {analysis_date}", box=box.ROUNDED)
     table.add_column("Rang", style="bold", justify="right", width=5)
     table.add_column("Ticker", style="bold cyan", width=8)
@@ -1225,11 +1196,8 @@ def pick(
     table.add_column("Score", justify="right", width=7)
     table.add_column("Begründung", no_wrap=False)
 
-    signal_styles = {"BUY": "green", "SELL": "red", "HOLD": "yellow"}
-
     for rank, pick_result in enumerate(top_picks, start=1):
-        style = signal_styles.get(pick_result.signal, "white")
-        # Kurzbegründung: erste 80 Zeichen der Decision
+        style = SIGNAL_STYLES.get(pick_result.signal, "white")
         short_reason = (pick_result.decision_text[:80] + "…") if len(pick_result.decision_text) > 80 else pick_result.decision_text
         table.add_row(
             str(rank),
@@ -1238,10 +1206,40 @@ def pick(
             f"{pick_result.score:+.1f}",
             short_reason,
         )
+    return table
 
-    console.print(table)
 
-    # Ergebnis persistieren
+@app.command()
+def pick(
+    date: Optional[str] = typer.Option(None, "--date", "-d", help="Analyse-Datum (YYYY-MM-DD). Standard: heute."),
+    top_n: int = typer.Option(10, "--top", "-n", help="Anzahl Top-Aktien die ausgewählt werden."),
+    delay: float = typer.Option(1.0, "--delay", help="Wartezeit in Sekunden zwischen Analysen."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Kein LLM-Call, Mock-Signale für Tests."),
+):
+    """Analysiert ~30 S&P 500 Aktien und wählt die Top-N mit dem stärksten Signal aus."""
+    raw_date = date or datetime.date.today().isoformat()
+    try:
+        datetime.date.fromisoformat(raw_date)
+    except ValueError:
+        raise typer.BadParameter(f"Ungültiges Datum '{raw_date}'. Erwartet: YYYY-MM-DD")
+    analysis_date = raw_date
+
+    console.print(f"\n[bold cyan]TradingAgents Pick[/bold cyan] — Datum: [yellow]{analysis_date}[/yellow]")
+    console.print(f"Analysiere {len(UNIVERSE)} Aktien, wähle Top {top_n} aus...\n")
+
+    if dry_run:
+        propagate_fn = _make_mock_propagate_fn()
+        delay = 0.0
+    else:
+        graph = TradingAgentsGraph(config=DEFAULT_CONFIG.copy())
+        propagate_fn = graph.propagate
+
+    runner = BatchRunner(propagate_fn=propagate_fn, delay_seconds=delay)
+    results = runner.run(UNIVERSE, analysis_date)
+    top_picks = results[:top_n]
+
+    console.print(_build_picks_table(top_picks, top_n, analysis_date))
+
     output_path = save_picks(top_picks, date=analysis_date)
     console.print(f"\n[green]✓ Ergebnis gespeichert:[/green] {output_path}")
 
