@@ -221,3 +221,6 @@ __marimo__/
 # Portfolio data (local machine only)
 portfolio_data/latest_picks.json
 portfolio_data/history/
+
+# Results (local machine only)
+results/
