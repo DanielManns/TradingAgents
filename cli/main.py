@@ -28,14 +28,21 @@ import random
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.portfolio.universe import UNIVERSE
-from tradingagents.portfolio.batch_runner import BatchRunner
-from tradingagents.portfolio.persistence import save_picks
+from tradingagents.portfolio.batch_runner import BatchRunner, PickResult
+from tradingagents.portfolio.persistence import save_picks, load_picks, archive_picks
+from tradingagents.portfolio.rebalancer import Rebalancer, RebalanceAction
+from tradingagents.portfolio.scorer import KeywordScorer
 from cli.models import AnalystType
 from cli.utils import *
 from cli.announcements import fetch_announcements, display_announcements
 from cli.stats_handler import StatsCallbackHandler
 
 SIGNAL_STYLES: dict[str, str] = {"BUY": "green", "SELL": "red", "HOLD": "yellow"}
+ACTION_STYLES: dict[RebalanceAction, str] = {
+    RebalanceAction.HOLD: "yellow",
+    RebalanceAction.SELL: "red",
+    RebalanceAction.BUY: "green",
+}
 
 console = Console()
 
@@ -1179,15 +1186,28 @@ def analyze():
     run_analysis()
 
 
-def _make_mock_propagate_fn():
-    """Erstellt eine Mock-propagate-Funktion für --dry-run."""
-    def _mock_propagate(ticker: str, trade_date: str):
-        signal = random.choice(["BUY", "HOLD", "SELL"])
-        return {"final_trade_decision": f"Mock-Analyse für {ticker}: {signal}"}, signal
-    return _mock_propagate
+def _resolve_date(date: Optional[str]) -> str:
+    """Gibt ein valides ISO-Datum zurück oder wirft typer.BadParameter."""
+    raw = date or datetime.date.today().isoformat()
+    try:
+        datetime.date.fromisoformat(raw)
+    except ValueError:
+        raise typer.BadParameter(f"Ungültiges Datum '{raw}'. Erwartet: YYYY-MM-DD")
+    return raw
 
 
-def _build_picks_table(top_picks, top_n: int, analysis_date: str) -> Table:
+def _make_propagate_fn(dry_run: bool):
+    """Gibt propagate-Funktion zurück — entweder Mock (dry_run) oder echten Graph."""
+    if dry_run:
+        def _mock(ticker: str, _date: str):
+            signal = random.choice(["BUY", "HOLD", "SELL"])
+            return {"final_trade_decision": f"Mock-Analyse für {ticker}: {signal}"}, signal
+        return _mock
+    graph = TradingAgentsGraph(config=DEFAULT_CONFIG.copy())
+    return graph.propagate
+
+
+def _build_picks_table(top_picks: list[PickResult], top_n: int, analysis_date: str) -> Table:
     """Erstellt eine Rich-Tabelle aus den Top-Picks."""
     table = Table(title=f"Top {top_n} Aktien — {analysis_date}", box=box.ROUNDED)
     table.add_column("Rang", style="bold", justify="right", width=5)
@@ -1209,6 +1229,29 @@ def _build_picks_table(top_picks, top_n: int, analysis_date: str) -> Table:
     return table
 
 
+def _build_rebalance_table(actions, new_signals: dict, analysis_date: str) -> Table:
+    """Erstellt eine Rich-Tabelle aus den Rebalance-Aktionen."""
+    table = Table(title=f"Rebalance-Plan — {analysis_date}", box=box.ROUNDED)
+    table.add_column("Aktion", width=6)
+    table.add_column("Ticker", style="bold cyan", width=8)
+    table.add_column("Signal", width=6)
+    table.add_column("Alter Score", justify="right", width=11)
+    table.add_column("Neuer Score", justify="right", width=11)
+
+    for ra in sorted(actions, key=lambda r: r.action.value):
+        style = ACTION_STYLES[ra.action]
+        sig = new_signals.get(ra.ticker, "—")
+        sig_style = SIGNAL_STYLES.get(sig, "white")
+        table.add_row(
+            f"[{style}]{ra.action.value}[/{style}]",
+            ra.ticker,
+            f"[{sig_style}]{sig}[/{sig_style}]",
+            f"{ra.old_score:+.1f}" if ra.action != RebalanceAction.BUY else "—",
+            f"{ra.new_score:+.1f}",
+        )
+    return table
+
+
 @app.command()
 def pick(
     date: Optional[str] = typer.Option(None, "--date", "-d", help="Analyse-Datum (YYYY-MM-DD). Standard: heute."),
@@ -1217,31 +1260,77 @@ def pick(
     dry_run: bool = typer.Option(False, "--dry-run", help="Kein LLM-Call, Mock-Signale für Tests."),
 ):
     """Analysiert ~30 S&P 500 Aktien und wählt die Top-N mit dem stärksten Signal aus."""
-    raw_date = date or datetime.date.today().isoformat()
-    try:
-        datetime.date.fromisoformat(raw_date)
-    except ValueError:
-        raise typer.BadParameter(f"Ungültiges Datum '{raw_date}'. Erwartet: YYYY-MM-DD")
-    analysis_date = raw_date
+    analysis_date = _resolve_date(date)
+    if dry_run:
+        delay = 0.0
 
     console.print(f"\n[bold cyan]TradingAgents Pick[/bold cyan] — Datum: [yellow]{analysis_date}[/yellow]")
     console.print(f"Analysiere {len(UNIVERSE)} Aktien, wähle Top {top_n} aus...\n")
 
-    if dry_run:
-        propagate_fn = _make_mock_propagate_fn()
-        delay = 0.0
-    else:
-        graph = TradingAgentsGraph(config=DEFAULT_CONFIG.copy())
-        propagate_fn = graph.propagate
-
-    runner = BatchRunner(propagate_fn=propagate_fn, delay_seconds=delay)
-    results = runner.run(UNIVERSE, analysis_date)
+    results = BatchRunner(propagate_fn=_make_propagate_fn(dry_run), delay_seconds=delay).run(UNIVERSE, analysis_date)
     top_picks = results[:top_n]
 
     console.print(_build_picks_table(top_picks, top_n, analysis_date))
+    console.print(f"\n[dim]{len(results)} Aktien analysiert, Top {top_n} gespeichert.[/dim]")
 
     output_path = save_picks(top_picks, date=analysis_date)
-    console.print(f"\n[green]✓ Ergebnis gespeichert:[/green] {output_path}")
+    console.print(f"[green]✓ Ergebnis gespeichert:[/green] {output_path}")
+
+
+@app.command()
+def rebalance(
+    date: Optional[str] = typer.Option(None, "--date", "-d", help="Analyse-Datum (YYYY-MM-DD). Standard: heute."),
+    min_improvement: float = typer.Option(0.3, "--min-improvement", help="Mindest-Score-Verbesserung für einen Tausch."),
+    top_n: int = typer.Option(10, "--top", "-n", help="Portfolio-Größe (Anzahl Aktien)."),
+    delay: float = typer.Option(1.0, "--delay", help="Wartezeit in Sekunden zwischen Analysen."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Kein LLM-Call, Mock-Signale für Tests."),
+):
+    """Lädt vorherige Picks, analysiert alle Kandidaten neu und empfiehlt HOLD/SELL/BUY."""
+    previous = load_picks()
+    if previous is None:
+        console.print("[red]Kein Portfolio gefunden. Bitte zuerst `tradingagents pick` ausführen.[/red]")
+        raise typer.Exit(code=1)
+
+    analysis_date = _resolve_date(date)
+    if dry_run:
+        delay = 0.0
+
+    old_picks = previous["picks"]
+    old_date = previous["date"]
+    held_tickers = [p["ticker"] for p in old_picks]
+    # Holdings zuerst, dann Universe-Kandidaten — dict.fromkeys erhält Reihenfolge und dedupliziert
+    all_tickers = list(dict.fromkeys(held_tickers + UNIVERSE))
+
+    console.print(f"\n[bold cyan]TradingAgents Rebalance[/bold cyan] — Datum: [yellow]{analysis_date}[/yellow]")
+    console.print(f"Vorheriges Portfolio vom [yellow]{old_date}[/yellow]: {', '.join(held_tickers)}")
+    console.print(f"Analysiere {len(all_tickers)} Ticker...\n")
+
+    results = BatchRunner(propagate_fn=_make_propagate_fn(dry_run), delay_seconds=delay).run(all_tickers, analysis_date)
+
+    new_scores = {r.ticker: r.score for r in results}
+    new_decision_texts = {r.ticker: r.decision_text for r in results}
+    new_signals = {r.ticker: r.signal for r in results}
+
+    actions = Rebalancer(min_improvement=min_improvement).compute(old_picks, new_scores, top_n=top_n)
+
+    console.print(_build_rebalance_table(actions, new_signals, analysis_date))
+
+    new_picks = [
+        PickResult(
+            ticker=ra.ticker,
+            score=ra.new_score,
+            signal=new_signals.get(ra.ticker, "HOLD"),
+            decision_text=new_decision_texts.get(ra.ticker, ""),
+        )
+        for ra in actions
+        if ra.action in (RebalanceAction.HOLD, RebalanceAction.BUY)
+    ]
+
+    archived = archive_picks(date=old_date)
+    out_path = save_picks(new_picks, date=analysis_date)
+    console.print(f"\n[green]✓ Neues Portfolio gespeichert:[/green] {out_path}")
+    if archived:
+        console.print(f"[dim]Alter State archiviert als:[/dim] {archived}")
 
 
 if __name__ == "__main__":

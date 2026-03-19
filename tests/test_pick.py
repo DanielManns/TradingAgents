@@ -127,12 +127,12 @@ class TestBatchRunner:
         results = BatchRunner(propagate_fn=fn).run([], "2024-01-01")
         assert results == []
 
-    def test_all_failing_tickers_returns_empty(self):
+    def test_majority_failures_raises_runtime_error(self):
         def always_fail(ticker: str, date: str):
             raise RuntimeError("always fails")
 
-        results = BatchRunner(propagate_fn=always_fail).run(["AAPL", "MSFT"], "2024-01-01")
-        assert results == []
+        with pytest.raises(RuntimeError, match="Analysen fehlgeschlagen"):
+            BatchRunner(propagate_fn=always_fail).run(["AAPL", "MSFT"], "2024-01-01")
 
 
 # ---------------------------------------------------------------------------
