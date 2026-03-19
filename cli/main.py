@@ -1186,15 +1186,28 @@ def analyze():
     run_analysis()
 
 
-def _make_mock_propagate_fn():
-    """Erstellt eine Mock-propagate-Funktion für --dry-run."""
-    def _mock_propagate(ticker: str, trade_date: str):
-        signal = random.choice(["BUY", "HOLD", "SELL"])
-        return {"final_trade_decision": f"Mock-Analyse für {ticker}: {signal}"}, signal
-    return _mock_propagate
+def _resolve_date(date: Optional[str]) -> str:
+    """Gibt ein valides ISO-Datum zurück oder wirft typer.BadParameter."""
+    raw = date or datetime.date.today().isoformat()
+    try:
+        datetime.date.fromisoformat(raw)
+    except ValueError:
+        raise typer.BadParameter(f"Ungültiges Datum '{raw}'. Erwartet: YYYY-MM-DD")
+    return raw
 
 
-def _build_picks_table(top_picks, top_n: int, analysis_date: str) -> Table:
+def _make_propagate_fn(dry_run: bool):
+    """Gibt propagate-Funktion zurück — entweder Mock (dry_run) oder echten Graph."""
+    if dry_run:
+        def _mock(ticker: str, _date: str):
+            signal = random.choice(["BUY", "HOLD", "SELL"])
+            return {"final_trade_decision": f"Mock-Analyse für {ticker}: {signal}"}, signal
+        return _mock
+    graph = TradingAgentsGraph(config=DEFAULT_CONFIG.copy())
+    return graph.propagate
+
+
+def _build_picks_table(top_picks: list[PickResult], top_n: int, analysis_date: str) -> Table:
     """Erstellt eine Rich-Tabelle aus den Top-Picks."""
     table = Table(title=f"Top {top_n} Aktien — {analysis_date}", box=box.ROUNDED)
     table.add_column("Rang", style="bold", justify="right", width=5)
@@ -1247,31 +1260,21 @@ def pick(
     dry_run: bool = typer.Option(False, "--dry-run", help="Kein LLM-Call, Mock-Signale für Tests."),
 ):
     """Analysiert ~30 S&P 500 Aktien und wählt die Top-N mit dem stärksten Signal aus."""
-    raw_date = date or datetime.date.today().isoformat()
-    try:
-        datetime.date.fromisoformat(raw_date)
-    except ValueError:
-        raise typer.BadParameter(f"Ungültiges Datum '{raw_date}'. Erwartet: YYYY-MM-DD")
-    analysis_date = raw_date
+    analysis_date = _resolve_date(date)
+    if dry_run:
+        delay = 0.0
 
     console.print(f"\n[bold cyan]TradingAgents Pick[/bold cyan] — Datum: [yellow]{analysis_date}[/yellow]")
     console.print(f"Analysiere {len(UNIVERSE)} Aktien, wähle Top {top_n} aus...\n")
 
-    if dry_run:
-        propagate_fn = _make_mock_propagate_fn()
-        delay = 0.0
-    else:
-        graph = TradingAgentsGraph(config=DEFAULT_CONFIG.copy())
-        propagate_fn = graph.propagate
-
-    runner = BatchRunner(propagate_fn=propagate_fn, delay_seconds=delay)
-    results = runner.run(UNIVERSE, analysis_date)
+    results = BatchRunner(propagate_fn=_make_propagate_fn(dry_run), delay_seconds=delay).run(UNIVERSE, analysis_date)
     top_picks = results[:top_n]
 
     console.print(_build_picks_table(top_picks, top_n, analysis_date))
+    console.print(f"\n[dim]{len(results)} Aktien analysiert, Top {top_n} gespeichert.[/dim]")
 
     output_path = save_picks(top_picks, date=analysis_date)
-    console.print(f"\n[green]✓ Ergebnis gespeichert:[/green] {output_path}")
+    console.print(f"[green]✓ Ergebnis gespeichert:[/green] {output_path}")
 
 
 @app.command()
@@ -1288,30 +1291,21 @@ def rebalance(
         console.print("[red]Kein Portfolio gefunden. Bitte zuerst `tradingagents pick` ausführen.[/red]")
         raise typer.Exit(code=1)
 
-    raw_date = date or datetime.date.today().isoformat()
-    try:
-        datetime.date.fromisoformat(raw_date)
-    except ValueError:
-        raise typer.BadParameter(f"Ungültiges Datum '{raw_date}'. Erwartet: YYYY-MM-DD")
-    analysis_date = raw_date
+    analysis_date = _resolve_date(date)
+    if dry_run:
+        delay = 0.0
 
     old_picks = previous["picks"]
     old_date = previous["date"]
     held_tickers = [p["ticker"] for p in old_picks]
+    # Holdings zuerst, dann Universe-Kandidaten — dict.fromkeys erhält Reihenfolge und dedupliziert
     all_tickers = list(dict.fromkeys(held_tickers + UNIVERSE))
 
     console.print(f"\n[bold cyan]TradingAgents Rebalance[/bold cyan] — Datum: [yellow]{analysis_date}[/yellow]")
     console.print(f"Vorheriges Portfolio vom [yellow]{old_date}[/yellow]: {', '.join(held_tickers)}")
     console.print(f"Analysiere {len(all_tickers)} Ticker...\n")
 
-    if dry_run:
-        propagate_fn = _make_mock_propagate_fn()
-        delay = 0.0
-    else:
-        graph = TradingAgentsGraph(config=DEFAULT_CONFIG.copy())
-        propagate_fn = graph.propagate
-
-    results = BatchRunner(propagate_fn=propagate_fn, scorer=KeywordScorer(), delay_seconds=delay).run(all_tickers, analysis_date)
+    results = BatchRunner(propagate_fn=_make_propagate_fn(dry_run), delay_seconds=delay).run(all_tickers, analysis_date)
 
     new_scores = {r.ticker: r.score for r in results}
     new_decision_texts = {r.ticker: r.decision_text for r in results}
@@ -1332,10 +1326,11 @@ def rebalance(
         if ra.action in (RebalanceAction.HOLD, RebalanceAction.BUY)
     ]
 
-    archive_picks(date=old_date)
+    archived = archive_picks(date=old_date)
     out_path = save_picks(new_picks, date=analysis_date)
     console.print(f"\n[green]✓ Neues Portfolio gespeichert:[/green] {out_path}")
-    console.print(f"[dim]Alter State archiviert als:[/dim] portfolio_data/history/{old_date}.json")
+    if archived:
+        console.print(f"[dim]Alter State archiviert als:[/dim] {archived}")
 
 
 if __name__ == "__main__":
