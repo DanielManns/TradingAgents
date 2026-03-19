@@ -12,7 +12,7 @@ class RebalanceAction(str, Enum):
     BUY = "BUY"
 
 
-@dataclass
+@dataclass(frozen=True)
 class RebalanceResult:
     ticker: str
     action: RebalanceAction
@@ -37,13 +37,12 @@ class Rebalancer:
         new_scores: dict[str, float],
         top_n: int = 10,
     ) -> list[RebalanceResult]:
-        """
-        Berechnet Rebalancing-Aktionen.
+        """Berechnet Rebalancing-Aktionen.
 
         Args:
             old_picks: Liste von Pick-Dicts (keys: ticker, score) aus latest_picks.json.
             new_scores: Mapping ticker → neuer Score für alle analysierten Kandidaten.
-            top_n: Ziel-Portfolio-Größe.
+            top_n: Ziel-Portfolio-Größe. Das Ergebnis enthält genau top_n HOLD+BUY Positionen.
 
         Returns:
             Liste von RebalanceResult (HOLD für Beibehaltene, SELL+BUY für Tausche).
@@ -51,25 +50,18 @@ class Rebalancer:
         old_by_ticker = {p["ticker"]: p["score"] for p in old_picks}
         holdings = list(old_by_ticker.keys())
 
-        # Kandidaten die nicht im aktuellen Portfolio sind, absteigend nach neuem Score
+        # Neue Score für jedes Holding (Fallback: alter Score wenn nicht neu analysiert)
+        holding_new_scores = {t: new_scores.get(t, old_by_ticker[t]) for t in holdings}
+
+        # Kandidaten außerhalb des aktuellen Portfolios, absteigend nach neuem Score
         candidates = sorted(
             [(t, s) for t, s in new_scores.items() if t not in old_by_ticker],
             key=lambda x: (-x[1], x[0]),
         )
 
-        results: list[RebalanceResult] = []
-        sells: list[str] = []
-        buys: list[str] = []
-
-        # Für jedes Holding: neuen Score holen, sonst alten behalten
-        holding_new_scores = {t: new_scores.get(t, old_by_ticker[t]) for t in holdings}
-
-        # Schlechteste Holdings absteigend nach neuem Score sortieren (schwächste zuerst)
+        # Greedy: schwächstes Holding durch besten Kandidaten ersetzen, wenn Hurdle überschritten
         sorted_holdings = sorted(holdings, key=lambda t: holding_new_scores[t])
-
         remaining_candidates = list(candidates)
-
-        # Greedy: Ersetze das schwächste Holding durch den besten Kandidaten, wenn Hurdle überschritten
         replaced: set[str] = set()
         bought: list[str] = []
 
@@ -77,13 +69,13 @@ class Rebalancer:
             if not remaining_candidates:
                 break
             best_candidate, best_score = remaining_candidates[0]
-            current_score = holding_new_scores[holding]
-            if best_score - current_score >= self.min_improvement:
+            if best_score - holding_new_scores[holding] >= self.min_improvement:
                 replaced.add(holding)
                 bought.append(best_candidate)
                 remaining_candidates.pop(0)
 
-        # Ergebnisse zusammenstellen
+        results: list[RebalanceResult] = []
+
         for ticker in holdings:
             action = RebalanceAction.SELL if ticker in replaced else RebalanceAction.HOLD
             results.append(RebalanceResult(
@@ -101,4 +93,27 @@ class Rebalancer:
                 new_score=new_scores[ticker],
             ))
 
-        return results
+        # Sicherstellen dass das Ergebnis-Portfolio genau top_n Positionen hat.
+        # Sortiere HOLD+BUY nach neuem Score und behalte nur top_n davon.
+        keepers = sorted(
+            [r for r in results if r.action in (RebalanceAction.HOLD, RebalanceAction.BUY)],
+            key=lambda r: (-r.new_score, r.ticker),
+        )[:top_n]
+        keeper_tickers = {r.ticker for r in keepers}
+
+        # Positionen die durch top_n-Trimming rausfallen werden zu zusätzlichen SELLs
+        final: list[RebalanceResult] = []
+        for r in results:
+            if r.action == RebalanceAction.SELL:
+                final.append(r)
+            elif r.ticker in keeper_tickers:
+                final.append(r)
+            else:
+                final.append(RebalanceResult(
+                    ticker=r.ticker,
+                    action=RebalanceAction.SELL,
+                    old_score=r.old_score,
+                    new_score=r.new_score,
+                ))
+
+        return final
