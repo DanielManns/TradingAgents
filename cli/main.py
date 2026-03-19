@@ -25,6 +25,9 @@ from rich.rule import Rule
 
 import random
 
+import pandas as pd
+import yfinance as yf
+
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.portfolio.universe import UNIVERSE
@@ -1186,6 +1189,26 @@ def analyze():
     run_analysis()
 
 
+def _fetch_price(ticker: str, date: str | None = None) -> float | None:
+    """Fetches the closing price for a ticker, optionally at a specific date."""
+    try:
+        t = yf.Ticker(ticker)
+        if date:
+            start = pd.Timestamp(date)
+            end = start + pd.Timedelta(days=5)
+            hist = t.history(start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"))
+            if hist.empty:
+                return None
+            return float(hist["Close"].iloc[0])
+        else:
+            hist = t.history(period="1d")
+            if hist.empty:
+                return None
+            return float(hist["Close"].iloc[-1])
+    except Exception:
+        return None
+
+
 def _resolve_date(date: Optional[str]) -> str:
     """Gibt ein valides ISO-Datum zurück oder wirft typer.BadParameter."""
     raw = date or datetime.date.today().isoformat()
@@ -1280,35 +1303,12 @@ def pick(
 @app.command()
 def status():
     """Zeigt aktuellen Portfolio-Stand mit Performance vs. SPY-Benchmark."""
-    from rich.table import Table
-    from tradingagents.portfolio.persistence import load_picks
     from tradingagents.portfolio.status import PortfolioStatus
 
     picks_payload = load_picks()
     if picks_payload is None:
         console.print("[red]Kein Portfolio gefunden. Bitte zuerst `tradingagents pick` ausführen.[/red]")
         raise typer.Exit(code=1)
-
-    import yfinance as yf
-
-    def _fetch_price(ticker: str, date: str | None = None) -> float | None:
-        try:
-            t = yf.Ticker(ticker)
-            if date:
-                import pandas as pd
-                start = pd.Timestamp(date)
-                end = start + pd.Timedelta(days=5)
-                hist = t.history(start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"))
-                if hist.empty:
-                    return None
-                return float(hist["Close"].iloc[0])
-            else:
-                hist = t.history(period="1d")
-                if hist.empty:
-                    return None
-                return float(hist["Close"].iloc[-1])
-        except Exception:
-            return None
 
     ps = PortfolioStatus(price_fetcher=_fetch_price)
 

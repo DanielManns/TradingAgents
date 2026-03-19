@@ -1,5 +1,5 @@
 from langchain_core.tools import tool
-from typing import Annotated
+from typing import Annotated, Optional
 from tradingagents.dataflows.interface import route_to_vendor
 
 @tool
@@ -23,7 +23,7 @@ def get_news(
 @tool
 def get_global_news(
     curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
-    look_back_days: Annotated[int, "Number of days to look back"] = None,
+    look_back_days: Annotated[Optional[int], "Number of days to look back"] = None,
     limit: Annotated[int, "Maximum number of articles to return"] = 5,
 ) -> str:
     """
