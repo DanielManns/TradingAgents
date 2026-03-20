@@ -1255,22 +1255,22 @@ def _build_picks_table(top_picks: list[PickResult], top_n: int, analysis_date: s
 def _build_rebalance_table(actions, new_signals: dict, analysis_date: str) -> Table:
     """Erstellt eine Rich-Tabelle aus den Rebalance-Aktionen."""
     table = Table(title=f"Rebalance-Plan — {analysis_date}", box=box.ROUNDED)
-    table.add_column("Aktion", width=6)
     table.add_column("Ticker", style="bold cyan", width=8)
-    table.add_column("Signal", width=6)
     table.add_column("Alter Score", justify="right", width=11)
+    table.add_column("Signal", width=6)
     table.add_column("Neuer Score", justify="right", width=11)
+    table.add_column("Aktion", width=6)
 
     for ra in sorted(actions, key=lambda r: r.action.value):
         style = ACTION_STYLES[ra.action]
         sig = new_signals.get(ra.ticker, "—")
         sig_style = SIGNAL_STYLES.get(sig, "white")
         table.add_row(
-            f"[{style}]{ra.action.value}[/{style}]",
             ra.ticker,
-            f"[{sig_style}]{sig}[/{sig_style}]",
             f"{ra.old_score:+.1f}" if ra.action != RebalanceAction.BUY else "—",
+            f"[{sig_style}]{sig}[/{sig_style}]",
             f"{ra.new_score:+.1f}",
+            f"[{style}]{ra.action.value}[/{style}]",
         )
     return table
 
