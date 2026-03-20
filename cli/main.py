@@ -36,7 +36,7 @@ from tradingagents.portfolio.models import MAX_PICKS, Pick, Portfolio, Rebalance
 from tradingagents.portfolio.persistence import save_portfolio, load_portfolio, load_state, archive_rebalance
 from tradingagents.portfolio.rebalancer import Rebalancer
 from tradingagents.portfolio.scorer import KeywordScorer
-from tradingagents.portfolio.status import PortfolioEvaluator, HistoricalEvaluator
+from tradingagents.portfolio.evaluate import evaluate_picks, evaluate_portfolio, evaluate_portfolio_state, live_period_return
 from cli.models import AnalystType
 from cli.utils import *
 from cli.announcements import fetch_announcements, display_announcements
@@ -1342,13 +1342,20 @@ def status(
         raise typer.Exit(code=1)
 
     with console.status("[bold blue]Loading current prices...[/bold blue]"):
-        picks, portfolio_return, spy_return = PortfolioEvaluator(price_fetcher=_fetch_price).evaluate(current)
+        eval_results = evaluate_picks(current.picks, price_fetcher=_fetch_price)
+        pct_changes = [pct for _, pct in eval_results.values()]
+        portfolio_return, spy_return = evaluate_portfolio(pct_changes, date=current.date, price_fetcher=_fetch_price)
+        enriched_picks = [
+            p.model_copy(update={"current_price": eval_results[p.ticker][0], "pct_change": eval_results[p.ticker][1]})
+            for p in current.picks if p.ticker in eval_results
+        ]
         evaluated = current.model_copy(update={
-            "picks": picks,
+            "picks": enriched_picks,
             "portfolio_return": portfolio_return,
             "spy_return": spy_return,
         })
-        twr = HistoricalEvaluator.evaluate(state, current_portfolio=evaluated)
+        live_ret = live_period_return(current.picks, eval_results)
+        twr = evaluate_portfolio_state(state, live_period_return=live_ret)
 
     # Pick-level: individual performance table
     console.print(_build_status_table(evaluated.picks, evaluated.date))
