@@ -219,8 +219,7 @@ __marimo__/
 **/data_cache/
 
 # Portfolio data (local machine only)
-portfolio_data/latest_picks.json
-portfolio_data/history/
+portfolio_data/*/
 
 # Results (local machine only)
 results/

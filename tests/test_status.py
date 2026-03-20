@@ -1,51 +1,58 @@
-"""Tests für Ticket 3: status — Aktuellen Portfolio-Stand anzeigen."""
+"""Tests for Ticket 3: status — display current portfolio state."""
 
 from __future__ import annotations
 
 import pytest
 
-from tradingagents.portfolio.batch_runner import PickResult
-from tradingagents.portfolio.persistence import save_picks, archive_picks
-from tradingagents.portfolio.status import PortfolioStatus, PortfolioEntry, compute_twr
+from tradingagents.portfolio.models import Pick, Portfolio, PortfolioState, RebalanceAction, RebalanceEntry, RebalanceEvent
+from tradingagents.portfolio.persistence import save_portfolio, load_portfolio, archive_rebalance
+from tradingagents.portfolio.status import PortfolioStatus, compute_twr
+
+PORTFOLIO = "test"
 
 
-def _make_picks_payload(tickers: list[tuple[str, float]]) -> dict:
-    """Erstellt ein picks-Dict wie es load_picks() zurückgibt."""
-    return {
-        "date": "2024-01-01",
-        "picks": [
-            {"ticker": t, "score": score, "signal": "BUY", "decision_text": f"Buy {t}"}
+def _make_portfolio(tickers: list[tuple[str, float]], date: str = "2024-01-01") -> Portfolio:
+    """Create a portfolio for tests."""
+    return Portfolio(
+        date=date,
+        picks=[
+            Pick(ticker=t, score=score, signal="BUY", decision_text=f"Buy {t}")
             for t, score in tickers
         ],
-    }
+    )
 
 
 def _seed_period(tmp_path, date: str, period_return: float | None) -> None:
-    """Speichert und archiviert einen einzelnen Pick für TWR-Tests."""
-    picks = [PickResult(ticker="AAPL", score=1.0, signal="BUY", decision_text="x")]
-    save_picks(picks, date=date, output_dir=str(tmp_path))
-    archive_picks(date=date, period_return=period_return, output_dir=str(tmp_path))
+    """Archive a rebalance event for TWR tests."""
+    picks = [Pick(ticker="AAPL", score=1.0, signal="BUY", decision_text="x")]
+    new_portfolio = Portfolio(date=date, picks=picks)
+    event = RebalanceEvent(
+        date=date,
+        entries=[RebalanceEntry(pick=picks[0], action=RebalanceAction.HOLD, old_score=1.0, new_score=1.0)],
+        period_return=period_return,
+    )
+    archive_rebalance(event, new_portfolio=new_portfolio, output_dir=str(tmp_path), portfolio=PORTFOLIO)
 
 
 # ---------------------------------------------------------------------------
-# PortfolioEntry
+# Pick as status entry
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("price_at_pick,current_price,pct_change", [
+@pytest.mark.parametrize("entry_price,current_price,pct_change", [
     (150.0, 165.0, 10.0),
     (100.0, 110.0, 10.0),
 ])
-def test_portfolio_entry_fields(price_at_pick, current_price, pct_change):
-    entry = PortfolioEntry(
+def test_pick_status_fields(entry_price, current_price, pct_change):
+    pick = Pick(
         ticker="AAPL",
         signal="BUY",
-        pick_date="2024-01-01",
-        price_at_pick=price_at_pick,
+        entry_date="2024-01-01",
+        entry_price=entry_price,
         current_price=current_price,
         pct_change=pct_change,
     )
-    assert entry.ticker == "AAPL"
-    assert entry.pct_change == pct_change
+    assert pick.ticker == "AAPL"
+    assert pick.pct_change == pct_change
 
 
 # ---------------------------------------------------------------------------
@@ -53,50 +60,50 @@ def test_portfolio_entry_fields(price_at_pick, current_price, pct_change):
 # ---------------------------------------------------------------------------
 
 class TestPortfolioStatus:
-    def test_build_entries_from_picks(self):
-        picks = _make_picks_payload([("AAPL", 1.0), ("MSFT", 0.0)])
+    def test_build_entries_from_portfolio(self):
+        portfolio = _make_portfolio([("AAPL", 1.0), ("MSFT", 0.0)])
         prices = {"AAPL": 165.0, "MSFT": 310.0}
         prices_at_pick = {"AAPL": 150.0, "MSFT": 300.0}
 
-        def fetch(ticker, date=None):
+        def fetch(ticker, date):
             return prices_at_pick.get(ticker) if date else prices.get(ticker)
 
-        entries = PortfolioStatus(price_fetcher=fetch).build(picks)
+        entries = PortfolioStatus(price_fetcher=fetch).build(portfolio)
         assert len(entries) == 2
-        assert all(isinstance(e, PortfolioEntry) for e in entries)
+        assert all(isinstance(e, Pick) for e in entries)
 
     def test_pct_change_calculated_correctly(self):
-        picks = _make_picks_payload([("AAPL", 1.0)])
+        portfolio = _make_portfolio([("AAPL", 1.0)])
 
-        entries = PortfolioStatus(price_fetcher=lambda t, date=None: 100.0 if date else 120.0).build(picks)
+        entries = PortfolioStatus(price_fetcher=lambda t, date: 100.0 if date else 120.0).build(portfolio)
         assert abs(entries[0].pct_change - 20.0) < 0.01
 
     def test_portfolio_avg_pct_change(self):
-        picks = _make_picks_payload([("AAPL", 1.0), ("MSFT", 1.0)])
+        portfolio = _make_portfolio([("AAPL", 1.0), ("MSFT", 1.0)])
 
-        def fetch(ticker, date=None):
+        def fetch(ticker, date):
             if date:
                 return 100.0
             return 110.0 if ticker == "AAPL" else 120.0
 
         ps = PortfolioStatus(price_fetcher=fetch)
-        assert abs(ps.portfolio_avg_pct(ps.build(picks)) - 15.0) < 0.01
+        assert abs(ps.portfolio_avg_pct(ps.build(portfolio)) - 15.0) < 0.01
 
     def test_none_price_skipped_gracefully(self):
-        picks = _make_picks_payload([("AAPL", 1.0), ("BADTICKER", 1.0)])
+        portfolio = _make_portfolio([("AAPL", 1.0), ("BADTICKER", 1.0)])
 
-        def fetch(ticker, date=None):
+        def fetch(ticker, date):
             return None if ticker == "BADTICKER" else (110.0 if date else 121.0)
 
-        tickers = [e.ticker for e in PortfolioStatus(price_fetcher=fetch).build(picks)]
+        tickers = [e.ticker for e in PortfolioStatus(price_fetcher=fetch).build(portfolio)]
         assert "BADTICKER" not in tickers
         assert "AAPL" in tickers
 
     def test_spy_benchmark(self):
-        picks = _make_picks_payload([("AAPL", 1.0)])
-        fetch = lambda t, date=None: 100.0 if date else 110.0
+        portfolio = _make_portfolio([("AAPL", 1.0)])
+        fetch = lambda t, date: 100.0 if date else 110.0
         ps = PortfolioStatus(price_fetcher=fetch)
-        spy_pct = ps.spy_pct_change(pick_date=picks["date"], price_fetcher=fetch)
+        spy_pct = ps.spy_pct_change(pick_date=portfolio.date)
         assert isinstance(spy_pct, float | type(None))
 
 
@@ -106,11 +113,11 @@ class TestPortfolioStatus:
 
 class TestComputeTWR:
     def test_returns_none_when_no_history(self, tmp_path):
-        assert compute_twr(output_dir=str(tmp_path)) is None
+        assert compute_twr(output_dir=str(tmp_path), portfolio=PORTFOLIO) is None
 
     def test_returns_none_when_all_period_returns_are_none(self, tmp_path):
         _seed_period(tmp_path, "2024-01-01", None)
-        assert compute_twr(output_dir=str(tmp_path)) is None
+        assert compute_twr(output_dir=str(tmp_path), portfolio=PORTFOLIO) is None
 
     @pytest.mark.parametrize("returns,expected_twr", [
         ([0.10], 0.10),                    # single period
@@ -122,4 +129,32 @@ class TestComputeTWR:
         dates = [f"2024-0{i+1}-01" for i in range(len(returns))]
         for date, r in zip(dates, returns):
             _seed_period(tmp_path, date, r)
-        assert abs(compute_twr(output_dir=str(tmp_path)) - expected_twr) < 0.0001
+        assert abs(compute_twr(output_dir=str(tmp_path), portfolio=PORTFOLIO) - expected_twr) < 0.0001
+
+
+# ---------------------------------------------------------------------------
+# Persist enriched status to current.json
+# ---------------------------------------------------------------------------
+
+class TestStatusPersistence:
+    def test_save_portfolio_persists_enriched_picks(self, tmp_path):
+        picks = [
+            Pick(ticker="AAPL", score=1.0, signal="BUY", decision_text="x",
+                 entry_date="2024-01-01", entry_price=150.0, current_price=165.0, pct_change=10.0),
+        ]
+        save_portfolio(picks, date="2024-01-01", output_dir=str(tmp_path), portfolio=PORTFOLIO)
+        loaded = load_portfolio(output_dir=str(tmp_path), portfolio=PORTFOLIO)
+        assert loaded.picks[0].current_price == 165.0
+        assert loaded.picks[0].pct_change == 10.0
+        assert loaded.picks[0].entry_price == 150.0
+
+    def test_save_portfolio_persists_aggregate_metrics(self, tmp_path):
+        picks = [Pick(ticker="AAPL", score=1.0, signal="BUY", decision_text="x")]
+        save_portfolio(
+            picks, date="2024-01-01", output_dir=str(tmp_path), portfolio=PORTFOLIO,
+            portfolio_return=5.5, spy_return=3.2, twr=0.08,
+        )
+        loaded = load_portfolio(output_dir=str(tmp_path), portfolio=PORTFOLIO)
+        assert loaded.portfolio_return == 5.5
+        assert loaded.spy_return == 3.2
+        assert loaded.twr == 0.08

@@ -1,31 +1,22 @@
-"""BatchRunner: Führt propagate() über eine Liste von Tickern aus."""
+"""BatchRunner: runs propagate() over a list of tickers."""
 
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 
+from tradingagents.portfolio.models import Pick
 from tradingagents.portfolio.scorer import BaseScorer, KeywordScorer
 
 if TYPE_CHECKING:
     from tradingagents.portfolio.cache import AnalysisCache
 
 
-@dataclass(frozen=True)
-class PickResult:
-    ticker: str
-    score: float
-    signal: str
-    decision_text: str
-    entry_price: float | None = None
-
-
 class BatchRunner:
-    """Analysiert eine Liste von Tickern via propagate() und gibt sortierte PickResults zurück."""
+    """Analyses a list of tickers via propagate() and returns sorted Picks."""
 
     def __init__(
         self,
@@ -41,13 +32,13 @@ class BatchRunner:
         self.cache = cache
         self._console = console or Console()
 
-    def run(self, tickers: list[str], date: str) -> list[PickResult]:
-        """Analysiert alle Ticker und gibt nach Score absteigend sortierte PickResults zurück.
+    def run(self, tickers: list[str], date: str) -> list[Pick]:
+        """Analyse all tickers and return Picks sorted descending by score.
 
         Raises:
-            RuntimeError: Wenn mehr als die Hälfte aller Ticker fehlschlagen.
+            RuntimeError: If more than half of all tickers fail.
         """
-        results: list[PickResult] = []
+        results: list[Pick] = []
         failures = 0
 
         with Progress(
@@ -58,10 +49,10 @@ class BatchRunner:
             console=self._console,
             transient=True,
         ) as progress:
-            task = progress.add_task("Analysiere Aktien...", total=len(tickers))
+            task = progress.add_task("Analysing tickers...", total=len(tickers))
 
             for ticker in tickers:
-                progress.update(task, description=f"Analysiere {ticker}...")
+                progress.update(task, description=f"Analysing {ticker}...")
                 try:
                     if self.cache is not None:
                         cached = self.cache.get(ticker, date)
@@ -69,7 +60,7 @@ class BatchRunner:
                             signal = cached["signal"]
                             final_state = cached["final_state"]
                             progress.advance(task)
-                            results.append(PickResult(
+                            results.append(Pick(
                                 ticker=ticker,
                                 score=self.scorer.score(signal),
                                 signal=signal,
@@ -83,7 +74,7 @@ class BatchRunner:
                     if self.cache is not None:
                         self.cache.put(ticker, date, final_state, signal)
 
-                    results.append(PickResult(
+                    results.append(Pick(
                         ticker=ticker,
                         score=self.scorer.score(signal),
                         signal=signal,
@@ -91,7 +82,7 @@ class BatchRunner:
                     ))
                 except Exception as exc:
                     failures += 1
-                    self._console.print(f"[yellow]⚠ {ticker} übersprungen: {exc}[/yellow]")
+                    self._console.print(f"[yellow]⚠ {ticker} skipped: {exc}[/yellow]")
                     progress.advance(task)
                     continue
 
@@ -101,8 +92,8 @@ class BatchRunner:
 
         if tickers and failures > len(tickers) // 2:
             raise RuntimeError(
-                f"{failures}/{len(tickers)} Analysen fehlgeschlagen. "
-                "Bitte API-Key und Verbindung prüfen."
+                f"{failures}/{len(tickers)} analyses failed. "
+                "Please check API key and connection."
             )
 
         results.sort(key=lambda r: (-r.score, r.ticker))

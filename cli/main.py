@@ -31,9 +31,10 @@ import yfinance as yf
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.portfolio.universe import UNIVERSE
-from tradingagents.portfolio.batch_runner import BatchRunner, PickResult
-from tradingagents.portfolio.persistence import save_picks, load_picks, archive_picks
-from tradingagents.portfolio.rebalancer import Rebalancer, RebalanceAction
+from tradingagents.portfolio.batch_runner import BatchRunner
+from tradingagents.portfolio.models import MAX_PICKS, Pick, Portfolio, RebalanceAction, RebalanceEvent
+from tradingagents.portfolio.persistence import save_portfolio, load_portfolio, archive_rebalance
+from tradingagents.portfolio.rebalancer import Rebalancer
 from tradingagents.portfolio.scorer import KeywordScorer
 from tradingagents.portfolio.status import PortfolioStatus, compute_twr
 from cli.models import AnalystType
@@ -1231,7 +1232,7 @@ def _make_propagate_fn(dry_run: bool):
     return graph.propagate
 
 
-def _build_picks_table(top_picks: list[PickResult], top_n: int, analysis_date: str) -> Table:
+def _build_picks_table(top_picks: list[Pick], top_n: int, analysis_date: str) -> Table:
     """Erstellt eine Rich-Tabelle aus den Top-Picks."""
     table = Table(title=f"Top {top_n} Aktien — {analysis_date}", box=box.ROUNDED)
     table.add_column("Rang", style="bold", justify="right", width=5)
@@ -1253,9 +1254,8 @@ def _build_picks_table(top_picks: list[PickResult], top_n: int, analysis_date: s
     return table
 
 
-def _build_status_table(entries, pick_date: str) -> Table:
+def _build_status_table(entries: list[Pick], pick_date: str) -> Table:
     """Erstellt eine Rich-Tabelle aus den Portfolio-Einträgen."""
-    from tradingagents.portfolio.status import PortfolioEntry
     table = Table(title=f"Portfolio-Status (seit {pick_date})", box=box.ROUNDED)
     table.add_column("Ticker", style="bold cyan", width=8)
     table.add_column("Signal", width=6)
@@ -1263,19 +1263,19 @@ def _build_status_table(entries, pick_date: str) -> Table:
     table.add_column("Aktueller Kurs", justify="right", width=14)
     table.add_column("Performance", justify="right", width=12)
 
-    for entry in sorted(entries, key=lambda e: -e.pct_change):
-        color = "green" if entry.pct_change >= 0 else "red"
+    for entry in sorted(entries, key=lambda e: -(e.pct_change or 0)):
+        color = "green" if (entry.pct_change or 0) >= 0 else "red"
         table.add_row(
             entry.ticker,
             entry.signal,
-            f"${entry.price_at_pick:.2f}",
-            f"${entry.current_price:.2f}",
-            f"[{color}]{entry.pct_change:+.1f}%[/{color}]",
+            f"${entry.entry_price:.2f}" if entry.entry_price else "—",
+            f"${entry.current_price:.2f}" if entry.current_price else "—",
+            f"[{color}]{entry.pct_change:+.1f}%[/{color}]" if entry.pct_change is not None else "—",
         )
     return table
 
 
-def _build_rebalance_table(actions, new_signals: dict, analysis_date: str) -> Table:
+def _build_rebalance_table(entries, new_signals: dict, analysis_date: str) -> Table:
     """Erstellt eine Rich-Tabelle aus den Rebalance-Aktionen."""
     table = Table(title=f"Rebalance-Plan — {analysis_date}", box=box.ROUNDED)
     table.add_column("Ticker", style="bold cyan", width=8)
@@ -1284,16 +1284,16 @@ def _build_rebalance_table(actions, new_signals: dict, analysis_date: str) -> Ta
     table.add_column("Neuer Score", justify="right", width=11)
     table.add_column("Aktion", width=6)
 
-    for ra in sorted(actions, key=lambda r: r.action.value):
-        style = ACTION_STYLES[ra.action]
-        sig = new_signals.get(ra.ticker, "—")
+    for entry in sorted(entries, key=lambda r: r.action.value):
+        style = ACTION_STYLES[entry.action]
+        sig = new_signals.get(entry.pick.ticker, "—")
         sig_style = SIGNAL_STYLES.get(sig, "white")
         table.add_row(
-            ra.ticker,
-            f"{ra.old_score:+.1f}" if ra.action != RebalanceAction.BUY else "—",
+            entry.pick.ticker,
+            f"{entry.old_score:+.1f}" if entry.action != RebalanceAction.BUY else "—",
             f"[{sig_style}]{sig}[/{sig_style}]",
-            f"{ra.new_score:+.1f}",
-            f"[{style}]{ra.action.value}[/{style}]",
+            f"{entry.new_score:+.1f}",
+            f"[{style}]{entry.action.value}[/{style}]",
         )
     return table
 
@@ -1301,9 +1301,10 @@ def _build_rebalance_table(actions, new_signals: dict, analysis_date: str) -> Ta
 @app.command()
 def pick(
     date: Optional[str] = typer.Option(None, "--date", "-d", help="Analyse-Datum (YYYY-MM-DD). Standard: heute."),
-    top_n: int = typer.Option(10, "--top", "-n", help="Anzahl Top-Aktien die ausgewählt werden."),
+    top_n: int = typer.Option(MAX_PICKS, "--top", "-n", help="Anzahl Top-Aktien die ausgewählt werden."),
     delay: float = typer.Option(1.0, "--delay", help="Wartezeit in Sekunden zwischen Analysen."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Kein LLM-Call, Mock-Signale für Tests."),
+    portfolio: str = typer.Option("default", "--portfolio", "-p", help="Portfolio-Name (Unterordner)."),
 ):
     """Analysiert ~30 S&P 500 Aktien und wählt die Top-N mit dem stärksten Signal aus."""
     analysis_date = _resolve_date(date)
@@ -1315,40 +1316,39 @@ def pick(
 
     results = BatchRunner(propagate_fn=_make_propagate_fn(dry_run), delay_seconds=delay).run(UNIVERSE, analysis_date)
     top_picks = [
-        PickResult(
-            ticker=r.ticker,
-            score=r.score,
-            signal=r.signal,
-            decision_text=r.decision_text,
-            entry_price=_fetch_price(r.ticker, analysis_date),
-        )
+        r.model_copy(update={
+            "entry_price": _fetch_price(r.ticker, analysis_date),
+            "entry_date": analysis_date,
+        })
         for r in results[:top_n]
     ]
 
     console.print(_build_picks_table(top_picks, top_n, analysis_date))
     console.print(f"\n[dim]{len(results)} Aktien analysiert, Top {top_n} gespeichert.[/dim]")
 
-    output_path = save_picks(top_picks, date=analysis_date)
+    output_path = save_portfolio(top_picks, date=analysis_date, portfolio=portfolio)
     console.print(f"[green]✓ Ergebnis gespeichert:[/green] {output_path}")
 
 
 @app.command()
-def status():
+def status(
+    portfolio: str = typer.Option("default", "--portfolio", "-p", help="Portfolio-Name (Unterordner)."),
+):
     """Zeigt aktuellen Portfolio-Stand mit Performance vs. SPY-Benchmark."""
-    picks_payload = load_picks()
-    if picks_payload is None:
-        console.print("[red]Kein Portfolio gefunden. Bitte zuerst `tradingagents pick` ausführen.[/red]")
+    current = load_portfolio(portfolio=portfolio)
+    if current is None:
+        console.print("[red]No portfolio found. Please run `tradingagents pick` first.[/red]")
         raise typer.Exit(code=1)
 
     ps = PortfolioStatus(price_fetcher=_fetch_price)
 
-    with console.status("[bold blue]Lade aktuelle Kurse...[/bold blue]"):
-        entries = ps.build(picks_payload)
+    with console.status("[bold blue]Loading current prices...[/bold blue]"):
+        entries = ps.build(current)
         avg_pct = ps.portfolio_avg_pct(entries)
-        spy_pct = ps.spy_pct_change(pick_date=picks_payload["date"], price_fetcher=_fetch_price)
-        twr = compute_twr()
+        spy_pct = ps.spy_pct_change(pick_date=current.date)
+        twr = compute_twr(portfolio=portfolio)
 
-    pick_date = picks_payload["date"]
+    pick_date = current.date
     console.print(_build_status_table(entries, pick_date))
 
     avg_color = "green" if avg_pct >= 0 else "red"
@@ -1364,29 +1364,39 @@ def status():
         twr_color = "green" if twr_pct >= 0 else "red"
         console.print(f"TWR (alle Perioden):     [{twr_color}]{twr_pct:+.1f}%[/{twr_color}]")
 
+    # Persist enriched picks and aggregate metrics back to state.json
+    save_portfolio(
+        entries,
+        date=current.date,
+        portfolio=portfolio,
+        portfolio_return=round(avg_pct, 2),
+        spy_return=spy_pct,
+        twr=twr,
+    )
+    console.print(f"\n[dim]state.json aktualisiert mit Live-Kursen.[/dim]")
+
 
 @app.command()
 def rebalance(
     date: Optional[str] = typer.Option(None, "--date", "-d", help="Analyse-Datum (YYYY-MM-DD). Standard: heute."),
     min_improvement: float = typer.Option(0.3, "--min-improvement", help="Mindest-Score-Verbesserung für einen Tausch."),
-    top_n: int = typer.Option(10, "--top", "-n", help="Portfolio-Größe (Anzahl Aktien)."),
+    top_n: int = typer.Option(MAX_PICKS, "--top", "-n", help="Portfolio-Groesse (Anzahl Aktien)."),
     delay: float = typer.Option(1.0, "--delay", help="Wartezeit in Sekunden zwischen Analysen."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Kein LLM-Call, Mock-Signale für Tests."),
+    portfolio: str = typer.Option("default", "--portfolio", "-p", help="Portfolio-Name (Unterordner)."),
 ):
     """Lädt vorherige Picks, analysiert alle Kandidaten neu und empfiehlt HOLD/SELL/BUY."""
-    previous = load_picks()
+    previous = load_portfolio(portfolio=portfolio)
     if previous is None:
-        console.print("[red]Kein Portfolio gefunden. Bitte zuerst `tradingagents pick` ausführen.[/red]")
+        console.print("[red]No portfolio found. Please run `tradingagents pick` first.[/red]")
         raise typer.Exit(code=1)
 
     analysis_date = _resolve_date(date)
     if dry_run:
         delay = 0.0
 
-    old_picks = previous["picks"]
-    old_date = previous["date"]
-    held_tickers = [p["ticker"] for p in old_picks]
-    # Holdings zuerst, dann Universe-Kandidaten — dict.fromkeys erhält Reihenfolge und dedupliziert
+    old_date = previous.date
+    held_tickers = [p.ticker for p in previous.picks]
     all_tickers = list(dict.fromkeys(held_tickers + UNIVERSE))
 
     console.print(f"\n[bold cyan]TradingAgents Rebalance[/bold cyan] — Datum: [yellow]{analysis_date}[/yellow]")
@@ -1399,64 +1409,65 @@ def rebalance(
     new_decision_texts = {r.ticker: r.decision_text for r in results}
     new_signals = {r.ticker: r.signal for r in results}
 
-    actions = Rebalancer(min_improvement=min_improvement).compute(old_picks, new_scores, top_n=top_n)
+    rebalance_entries = Rebalancer(min_improvement=min_improvement).compute(previous.picks, new_scores, top_n=top_n)
 
-    console.print(_build_rebalance_table(actions, new_signals, analysis_date))
+    console.print(_build_rebalance_table(rebalance_entries, new_signals, analysis_date))
 
+    # Build new portfolio picks from HOLD + BUY entries
     new_picks = [
-        PickResult(
-            ticker=ra.ticker,
-            score=ra.new_score,
-            signal=new_signals.get(ra.ticker, "HOLD"),
-            decision_text=new_decision_texts.get(ra.ticker, ""),
-        )
-        for ra in actions
-        if ra.action in (RebalanceAction.HOLD, RebalanceAction.BUY)
+        entry.pick.model_copy(update={
+            "score": entry.new_score,
+            "signal": new_signals.get(entry.pick.ticker, "HOLD"),
+            "decision_text": new_decision_texts.get(entry.pick.ticker, ""),
+            "entry_date": analysis_date if entry.action == RebalanceAction.BUY else entry.pick.entry_date,
+            "entry_price": _fetch_price(entry.pick.ticker, analysis_date) if entry.action == RebalanceAction.BUY else entry.pick.entry_price,
+        })
+        for entry in rebalance_entries
+        if entry.action in (RebalanceAction.HOLD, RebalanceAction.BUY)
     ]
 
     # Preise für alle alten Positionen holen: Entry am old_date, Exit jetzt
-    # Dient sowohl TWR-Berechnung als auch Transaktionspreisen im Archiv.
     exit_prices: dict[str, float | None] = {}
     period_returns = []
-    for pick in old_picks:
-        ticker = pick["ticker"]
-        entry = _fetch_price(ticker, old_date)
-        exit_ = _fetch_price(ticker, None)
-        exit_prices[ticker] = exit_
-        if entry is None or exit_ is None:
-            console.print(f"[yellow]⚠ Kein Preis für {ticker} — TWR dieser Periode unvollständig[/yellow]")
-        elif entry != 0:
-            period_returns.append((exit_ - entry) / entry)
+    for pick in previous.picks:
+        entry_p = _fetch_price(pick.ticker, old_date)
+        exit_ = _fetch_price(pick.ticker, None)
+        exit_prices[pick.ticker] = exit_
+        if entry_p is None or exit_ is None:
+            console.print(f"[yellow]⚠ Kein Preis für {pick.ticker} — TWR dieser Periode unvollständig[/yellow]")
+        elif entry_p != 0:
+            period_returns.append((exit_ - entry_p) / entry_p)
     period_return = sum(period_returns) / len(period_returns) if period_returns else None
     if period_return is None:
         console.print("[yellow]⚠ Period-Return konnte nicht berechnet werden — TWR für diese Periode wird übersprungen.[/yellow]")
 
-    # Transaktionspreise pro Aktion zusammenstellen
-    transactions = []
-    for ra in actions:
-        ticker = ra.ticker
-        if ra.action == RebalanceAction.SELL:
-            action_price = exit_prices.get(ticker)
-        elif ra.action == RebalanceAction.BUY:
-            action_price = _fetch_price(ticker, analysis_date)
-            if action_price is None:
-                console.print(f"[yellow]⚠ Kein Einstiegspreis für {ticker} — action_price wird als null archiviert[/yellow]")
+    # Enrich rebalance entries with exit/entry prices for archive
+    enriched_entries = []
+    for entry in rebalance_entries:
+        if entry.action == RebalanceAction.SELL:
+            updated_pick = entry.pick.model_copy(update={
+                "exit_date": analysis_date,
+                "exit_price": exit_prices.get(entry.pick.ticker),
+            })
+        elif entry.action == RebalanceAction.BUY:
+            buy_price = _fetch_price(entry.pick.ticker, analysis_date)
+            if buy_price is None:
+                console.print(f"[yellow]⚠ Kein Einstiegspreis für {entry.pick.ticker} — entry_price wird als null archiviert[/yellow]")
+            updated_pick = entry.pick.model_copy(update={
+                "signal": new_signals.get(entry.pick.ticker, "—"),
+                "decision_text": new_decision_texts.get(entry.pick.ticker, ""),
+                "score": entry.new_score,
+                "entry_date": analysis_date,
+                "entry_price": buy_price,
+            })
         else:
-            action_price = None
-        transactions.append({
-            "ticker": ticker,
-            "action": ra.action.value,
-            "action_price": action_price,
-            "score": ra.new_score,
-            "signal": new_signals.get(ticker, "—"),
-            "decision_text": new_decision_texts.get(ticker, ""),
-        })
+            updated_pick = entry.pick
+        enriched_entries.append(entry.model_copy(update={"pick": updated_pick}))
 
-    archived = archive_picks(date=old_date, period_return=period_return, transactions=transactions)
-    out_path = save_picks(new_picks, date=analysis_date)
-    console.print(f"\n[green]✓ Neues Portfolio gespeichert:[/green] {out_path}")
-    if archived:
-        console.print(f"[dim]Alter State archiviert als:[/dim] {archived}")
+    event = RebalanceEvent(date=old_date, entries=enriched_entries, period_return=period_return)
+    new_portfolio = Portfolio(date=analysis_date, picks=new_picks)
+    state_path = archive_rebalance(event, new_portfolio=new_portfolio, portfolio=portfolio)
+    console.print(f"\n[green]✓ Portfolio-State gespeichert:[/green] {state_path}")
 
 
 if __name__ == "__main__":

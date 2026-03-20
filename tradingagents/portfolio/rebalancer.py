@@ -1,65 +1,42 @@
-"""Rebalancer: Vergleicht alte Picks mit neuen Scores und empfiehlt HOLD/SELL/BUY."""
+"""Rebalancer: compares old picks with new scores and recommends HOLD/SELL/BUY."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import Enum
-
-
-class RebalanceAction(str, Enum):
-    HOLD = "HOLD"
-    SELL = "SELL"
-    BUY = "BUY"
-
-
-@dataclass(frozen=True)
-class RebalanceResult:
-    ticker: str
-    action: RebalanceAction
-    old_score: float
-    new_score: float
+from tradingagents.portfolio.models import MAX_PICKS, Pick, RebalanceAction, RebalanceEntry
 
 
 class Rebalancer:
-    """Berechnet Rebalancing-Aktionen basierend auf Score-Vergleich mit Hurdle-Rate."""
+    """Computes rebalancing actions based on score comparison with hurdle rate."""
 
     def __init__(self, min_improvement: float = 0.3):
-        """
-        Args:
-            min_improvement: Mindest-Score-Verbesserung eines neuen Kandidaten gegenüber
-                             einem bestehenden Holding, damit ein Tausch stattfindet.
-        """
         self.min_improvement = min_improvement
 
     def compute(
         self,
-        old_picks: list[dict],
+        old_picks: list[Pick],
         new_scores: dict[str, float],
-        top_n: int = 10,
-    ) -> list[RebalanceResult]:
-        """Berechnet Rebalancing-Aktionen.
+        top_n: int = MAX_PICKS,
+    ) -> list[RebalanceEntry]:
+        """Compute rebalancing actions.
 
         Args:
-            old_picks: Liste von Pick-Dicts (keys: ticker, score) aus latest_picks.json.
-            new_scores: Mapping ticker → neuer Score für alle analysierten Kandidaten.
-            top_n: Ziel-Portfolio-Größe. Das Ergebnis enthält genau top_n HOLD+BUY Positionen.
+            old_picks: List of Pick objects from the current portfolio.
+            new_scores: Mapping ticker -> new score for all analysed candidates.
+            top_n: Target portfolio size.
 
         Returns:
-            Liste von RebalanceResult (HOLD für Beibehaltene, SELL+BUY für Tausche).
+            List of RebalanceEntry (HOLD for kept, SELL+BUY for swaps).
         """
-        old_by_ticker = {p["ticker"]: p["score"] for p in old_picks}
+        old_by_ticker = {p.ticker: p for p in old_picks}
         holdings = list(old_by_ticker.keys())
 
-        # Neue Score für jedes Holding (Fallback: alter Score wenn nicht neu analysiert)
-        holding_new_scores = {t: new_scores.get(t, old_by_ticker[t]) for t in holdings}
+        holding_new_scores = {t: new_scores.get(t, old_by_ticker[t].score) for t in holdings}
 
-        # Kandidaten außerhalb des aktuellen Portfolios, absteigend nach neuem Score
         candidates = sorted(
             [(t, s) for t, s in new_scores.items() if t not in old_by_ticker],
             key=lambda x: (-x[1], x[0]),
         )
 
-        # Greedy: schwächstes Holding durch besten Kandidaten ersetzen, wenn Hurdle überschritten
         sorted_holdings = sorted(holdings, key=lambda t: holding_new_scores[t])
         remaining_candidates = list(candidates)
         replaced: set[str] = set()
@@ -74,43 +51,40 @@ class Rebalancer:
                 bought.append(best_candidate)
                 remaining_candidates.pop(0)
 
-        results: list[RebalanceResult] = []
+        results: list[RebalanceEntry] = []
 
         for ticker in holdings:
             action = RebalanceAction.SELL if ticker in replaced else RebalanceAction.HOLD
-            results.append(RebalanceResult(
-                ticker=ticker,
+            results.append(RebalanceEntry(
+                pick=old_by_ticker[ticker],
                 action=action,
-                old_score=old_by_ticker[ticker],
+                old_score=old_by_ticker[ticker].score,
                 new_score=holding_new_scores[ticker],
             ))
 
         for ticker in bought:
-            results.append(RebalanceResult(
-                ticker=ticker,
+            results.append(RebalanceEntry(
+                pick=Pick(ticker=ticker),
                 action=RebalanceAction.BUY,
                 old_score=0.0,
                 new_score=new_scores[ticker],
             ))
 
-        # Sicherstellen dass das Ergebnis-Portfolio genau top_n Positionen hat.
-        # Sortiere HOLD+BUY nach neuem Score und behalte nur top_n davon.
         keepers = sorted(
             [r for r in results if r.action in (RebalanceAction.HOLD, RebalanceAction.BUY)],
-            key=lambda r: (-r.new_score, r.ticker),
+            key=lambda r: (-r.new_score, r.pick.ticker),
         )[:top_n]
-        keeper_tickers = {r.ticker for r in keepers}
+        keeper_tickers = {r.pick.ticker for r in keepers}
 
-        # Positionen die durch top_n-Trimming rausfallen werden zu zusätzlichen SELLs
-        final: list[RebalanceResult] = []
+        final: list[RebalanceEntry] = []
         for r in results:
             if r.action == RebalanceAction.SELL:
                 final.append(r)
-            elif r.ticker in keeper_tickers:
+            elif r.pick.ticker in keeper_tickers:
                 final.append(r)
             else:
-                final.append(RebalanceResult(
-                    ticker=r.ticker,
+                final.append(RebalanceEntry(
+                    pick=r.pick,
                     action=RebalanceAction.SELL,
                     old_score=r.old_score,
                     new_score=r.new_score,

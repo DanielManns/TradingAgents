@@ -61,23 +61,19 @@ def pick(...):
     console.print(table)
 ```
 
-## Immutability
+## Data Structures — Pydantic Over Dataclasses
 
-Prefer immutable data structures:
+Always use **Pydantic `BaseModel`** instead of `dataclasses` or `TypedDict` for data structures. Pydantic provides validation, `model_dump()` for JSON serialization, `model_validate()` for deserialization, and `model_copy(update={...})` for immutable updates — all without custom code. Use `ConfigDict(frozen=True)` for immutable models. Centralize models in a dedicated `models.py` module per package.
 
 ```python
-from dataclasses import dataclass
+from pydantic import BaseModel, ConfigDict
 
-@dataclass(frozen=True)
-class User:
-    name: str
-    email: str
+class Pick(BaseModel):
+    model_config = ConfigDict(frozen=True)
 
-from typing import NamedTuple
-
-class Point(NamedTuple):
-    x: float
-    y: float
+    ticker: str
+    signal: str = ""
+    score: float = 0.0
 ```
 
 ## Formatting
