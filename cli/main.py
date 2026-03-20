@@ -1412,9 +1412,13 @@ def rebalance(
         ticker = pick["ticker"]
         entry = _fetch_price(ticker, old_date)
         exit_ = _fetch_price(ticker, None)
-        if entry and exit_ and entry != 0:
+        if entry is None or exit_ is None:
+            console.print(f"[yellow]⚠ Kein Preis für {ticker} — TWR dieser Periode unvollständig[/yellow]")
+        elif entry != 0:
             period_returns.append((exit_ - entry) / entry)
     period_return = sum(period_returns) / len(period_returns) if period_returns else None
+    if period_return is None:
+        console.print("[yellow]⚠ Period-Return konnte nicht berechnet werden — TWR für diese Periode wird übersprungen.[/yellow]")
 
     archived = archive_picks(date=old_date, period_return=period_return)
     out_path = save_picks(new_picks, date=analysis_date)
