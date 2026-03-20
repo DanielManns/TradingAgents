@@ -117,3 +117,47 @@ class TestHistoryArchiving:
         archive_picks(date="2024-01-01", period_return=period_return, output_dir=str(tmp_path))
         data = json.loads((tmp_path / "history" / "2024-01-01.json").read_text())
         assert data["period_return"] == expected
+
+    def test_hold_action_has_null_price(self, tmp_path):
+        self._setup(tmp_path)
+        transactions = [{"ticker": "AAPL", "action": "HOLD", "action_price": None,
+                         "score": 1.0, "signal": "BUY", "decision_text": "x"}]
+        archive_picks(date="2024-01-01", transactions=transactions, output_dir=str(tmp_path))
+        picks = json.loads((tmp_path / "history" / "2024-01-01.json").read_text())["picks"]
+        aapl = next(p for p in picks if p["ticker"] == "AAPL")
+        assert aapl["action"] == "HOLD"
+        assert aapl["action_price"] is None
+
+    def test_sell_action_stores_exit_price(self, tmp_path):
+        self._setup(tmp_path)
+        transactions = [{"ticker": "AAPL", "action": "SELL", "action_price": 175.50,
+                         "score": -1.0, "signal": "SELL", "decision_text": "x"}]
+        archive_picks(date="2024-01-01", transactions=transactions, output_dir=str(tmp_path))
+        picks = json.loads((tmp_path / "history" / "2024-01-01.json").read_text())["picks"]
+        aapl = next(p for p in picks if p["ticker"] == "AAPL")
+        assert aapl["action"] == "SELL"
+        assert aapl["action_price"] == 175.50
+
+    def test_buy_action_appended_with_entry_price(self, tmp_path):
+        # AAPL is in old picks; NVDA is a new BUY — must be appended
+        self._setup(tmp_path)
+        transactions = [
+            {"ticker": "AAPL", "action": "HOLD", "action_price": None,
+             "score": 1.0, "signal": "BUY", "decision_text": "hold"},
+            {"ticker": "NVDA", "action": "BUY",  "action_price": 485.20,
+             "score": 1.0, "signal": "BUY", "decision_text": "strong buy"},
+        ]
+        archive_picks(date="2024-01-01", transactions=transactions, output_dir=str(tmp_path))
+        picks = json.loads((tmp_path / "history" / "2024-01-01.json").read_text())["picks"]
+        tickers = [p["ticker"] for p in picks]
+        assert "NVDA" in tickers
+        nvda = next(p for p in picks if p["ticker"] == "NVDA")
+        assert nvda["action"] == "BUY"
+        assert nvda["action_price"] == 485.20
+
+    def test_no_transactions_leaves_picks_unchanged(self, tmp_path):
+        self._setup(tmp_path)
+        archive_picks(date="2024-01-01", output_dir=str(tmp_path))
+        picks = json.loads((tmp_path / "history" / "2024-01-01.json").read_text())["picks"]
+        assert "action" not in picks[0]
+        assert "action_price" not in picks[0]

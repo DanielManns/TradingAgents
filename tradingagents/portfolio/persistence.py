@@ -74,6 +74,7 @@ def load_picks(output_dir: str = "portfolio_data") -> PicksFile | None:
 def archive_picks(
     date: str,
     period_return: float | None = None,
+    transactions: list[dict] | None = None,
     output_dir: str = "portfolio_data",
 ) -> Path | None:
     """Archiviert latest_picks.json als history/YYYY-MM-DD.json.
@@ -82,6 +83,11 @@ def archive_picks(
         date: Datum des Portfolios (YYYY-MM-DD), wird als Dateiname verwendet.
         period_return: Gleichgewichtete Rendite der Periode (z.B. 0.05 für +5%).
                        None wenn Preise nicht verfügbar waren.
+        transactions: Liste von Transaktions-Dicts mit den Feldern
+                      ticker, action ("BUY"/"SELL"/"HOLD"), action_price (float | None),
+                      score, signal, decision_text.
+                      HOLD-Einträge erhalten action_price=None.
+                      BUY-Einträge werden an picks angehängt falls noch nicht vorhanden.
         output_dir: Ausgabeverzeichnis.
 
     Returns:
@@ -95,6 +101,28 @@ def archive_picks(
         return None
 
     data["period_return"] = period_return
+
+    if transactions:
+        tx_by_ticker = {t["ticker"]: t for t in transactions}
+        existing_tickers = {p["ticker"] for p in data["picks"]}
+
+        # Merge action + action_price into existing picks
+        for pick in data["picks"]:
+            tx = tx_by_ticker.get(pick["ticker"])
+            pick["action"] = tx["action"] if tx else "HOLD"
+            pick["action_price"] = tx["action_price"] if tx else None
+
+        # Append BUY entries for new positions not in the old portfolio
+        for tx in transactions:
+            if tx["ticker"] not in existing_tickers and tx["action"] == "BUY":
+                data["picks"].append({
+                    "ticker": tx["ticker"],
+                    "score": tx["score"],
+                    "signal": tx["signal"],
+                    "decision_text": tx["decision_text"],
+                    "action": "BUY",
+                    "action_price": tx["action_price"],
+                })
 
     history_dir = Path(output_dir) / "history"
     history_dir.mkdir(parents=True, exist_ok=True)

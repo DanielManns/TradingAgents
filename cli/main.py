@@ -1405,13 +1405,15 @@ def rebalance(
         if ra.action in (RebalanceAction.HOLD, RebalanceAction.BUY)
     ]
 
-    # Teilperioden-Return für TWR: gleichgewichtete Rendite aller gehaltenen Positionen
-    # Entry: Kurs am old_date, Exit: aktueller Kurs (= Rebalance-Datum)
+    # Preise für alle alten Positionen holen: Entry am old_date, Exit jetzt
+    # Dient sowohl TWR-Berechnung als auch Transaktionspreisen im Archiv.
+    exit_prices: dict[str, float | None] = {}
     period_returns = []
     for pick in old_picks:
         ticker = pick["ticker"]
         entry = _fetch_price(ticker, old_date)
         exit_ = _fetch_price(ticker, None)
+        exit_prices[ticker] = exit_
         if entry is None or exit_ is None:
             console.print(f"[yellow]⚠ Kein Preis für {ticker} — TWR dieser Periode unvollständig[/yellow]")
         elif entry != 0:
@@ -1420,7 +1422,28 @@ def rebalance(
     if period_return is None:
         console.print("[yellow]⚠ Period-Return konnte nicht berechnet werden — TWR für diese Periode wird übersprungen.[/yellow]")
 
-    archived = archive_picks(date=old_date, period_return=period_return)
+    # Transaktionspreise pro Aktion zusammenstellen
+    transactions = []
+    for ra in actions:
+        ticker = ra.ticker
+        if ra.action == RebalanceAction.SELL:
+            action_price = exit_prices.get(ticker)
+        elif ra.action == RebalanceAction.BUY:
+            action_price = _fetch_price(ticker, analysis_date)
+            if action_price is None:
+                console.print(f"[yellow]⚠ Kein Einstiegspreis für {ticker} — action_price wird als null archiviert[/yellow]")
+        else:
+            action_price = None
+        transactions.append({
+            "ticker": ticker,
+            "action": ra.action.value,
+            "action_price": action_price,
+            "score": ra.new_score,
+            "signal": new_signals.get(ticker, "—"),
+            "decision_text": new_decision_texts.get(ticker, ""),
+        })
+
+    archived = archive_picks(date=old_date, period_return=period_return, transactions=transactions)
     out_path = save_picks(new_picks, date=analysis_date)
     console.print(f"\n[green]✓ Neues Portfolio gespeichert:[/green] {out_path}")
     if archived:
