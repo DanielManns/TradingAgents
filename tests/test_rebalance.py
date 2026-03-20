@@ -141,3 +141,23 @@ class TestHistoryArchiving:
         save_picks(picks, date="2024-01-01", output_dir=str(tmp_path))
         archive_picks(date="2024-01-01", output_dir=str(tmp_path))
         assert (tmp_path / PICKS_FILENAME).exists()
+
+    def test_archive_stores_period_return(self, tmp_path):
+        from tradingagents.portfolio.persistence import archive_picks
+        import json
+
+        picks = [_make_pick("AAPL", 1.0)]
+        save_picks(picks, date="2024-01-01", output_dir=str(tmp_path))
+        archive_picks(date="2024-01-01", period_return=0.05, output_dir=str(tmp_path))
+        data = json.loads((tmp_path / "history" / "2024-01-01.json").read_text())
+        assert data["period_return"] == 0.05
+
+    def test_archive_period_return_none_when_not_provided(self, tmp_path):
+        from tradingagents.portfolio.persistence import archive_picks
+        import json
+
+        picks = [_make_pick("AAPL", 1.0)]
+        save_picks(picks, date="2024-01-01", output_dir=str(tmp_path))
+        archive_picks(date="2024-01-01", output_dir=str(tmp_path))
+        data = json.loads((tmp_path / "history" / "2024-01-01.json").read_text())
+        assert data["period_return"] is None

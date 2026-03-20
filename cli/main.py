@@ -35,6 +35,7 @@ from tradingagents.portfolio.batch_runner import BatchRunner, PickResult
 from tradingagents.portfolio.persistence import save_picks, load_picks, archive_picks
 from tradingagents.portfolio.rebalancer import Rebalancer, RebalanceAction
 from tradingagents.portfolio.scorer import KeywordScorer
+from tradingagents.portfolio.status import PortfolioStatus, compute_twr
 from cli.models import AnalystType
 from cli.utils import *
 from cli.announcements import fetch_announcements, display_announcements
@@ -1252,6 +1253,28 @@ def _build_picks_table(top_picks: list[PickResult], top_n: int, analysis_date: s
     return table
 
 
+def _build_status_table(entries, pick_date: str) -> Table:
+    """Erstellt eine Rich-Tabelle aus den Portfolio-Einträgen."""
+    from tradingagents.portfolio.status import PortfolioEntry
+    table = Table(title=f"Portfolio-Status (seit {pick_date})", box=box.ROUNDED)
+    table.add_column("Ticker", style="bold cyan", width=8)
+    table.add_column("Signal", width=6)
+    table.add_column("Kurs bei Pick", justify="right", width=14)
+    table.add_column("Aktueller Kurs", justify="right", width=14)
+    table.add_column("Performance", justify="right", width=12)
+
+    for entry in sorted(entries, key=lambda e: -e.pct_change):
+        color = "green" if entry.pct_change >= 0 else "red"
+        table.add_row(
+            entry.ticker,
+            entry.signal,
+            f"${entry.price_at_pick:.2f}",
+            f"${entry.current_price:.2f}",
+            f"[{color}]{entry.pct_change:+.1f}%[/{color}]",
+        )
+    return table
+
+
 def _build_rebalance_table(actions, new_signals: dict, analysis_date: str) -> Table:
     """Erstellt eine Rich-Tabelle aus den Rebalance-Aktionen."""
     table = Table(title=f"Rebalance-Plan — {analysis_date}", box=box.ROUNDED)
@@ -1303,8 +1326,6 @@ def pick(
 @app.command()
 def status():
     """Zeigt aktuellen Portfolio-Stand mit Performance vs. SPY-Benchmark."""
-    from tradingagents.portfolio.status import PortfolioStatus
-
     picks_payload = load_picks()
     if picks_payload is None:
         console.print("[red]Kein Portfolio gefunden. Bitte zuerst `tradingagents pick` ausführen.[/red]")
@@ -1316,26 +1337,10 @@ def status():
         entries = ps.build(picks_payload)
         avg_pct = ps.portfolio_avg_pct(entries)
         spy_pct = ps.spy_pct_change(pick_date=picks_payload["date"], price_fetcher=_fetch_price)
+        twr = compute_twr()
 
     pick_date = picks_payload["date"]
-    table = Table(title=f"Portfolio-Status (seit {pick_date})", box=box.ROUNDED)
-    table.add_column("Ticker", style="bold cyan", width=8)
-    table.add_column("Signal", width=6)
-    table.add_column("Kurs bei Pick", justify="right", width=14)
-    table.add_column("Aktueller Kurs", justify="right", width=14)
-    table.add_column("Performance", justify="right", width=12)
-
-    for entry in sorted(entries, key=lambda e: -e.pct_change):
-        color = "green" if entry.pct_change >= 0 else "red"
-        table.add_row(
-            entry.ticker,
-            entry.signal,
-            f"${entry.price_at_pick:.2f}",
-            f"${entry.current_price:.2f}",
-            f"[{color}]{entry.pct_change:+.1f}%[/{color}]",
-        )
-
-    console.print(table)
+    console.print(_build_status_table(entries, pick_date))
 
     avg_color = "green" if avg_pct >= 0 else "red"
     console.print(f"\nPortfolio Ø Performance: [{avg_color}]{avg_pct:+.1f}%[/{avg_color}]")
@@ -1345,6 +1350,10 @@ def status():
         diff = avg_pct - spy_pct
         diff_color = "green" if diff >= 0 else "red"
         console.print(f"Alpha vs. SPY:           [{diff_color}]{diff:+.1f}%[/{diff_color}]")
+    if twr is not None:
+        twr_pct = twr * 100
+        twr_color = "green" if twr_pct >= 0 else "red"
+        console.print(f"TWR (alle Perioden):     [{twr_color}]{twr_pct:+.1f}%[/{twr_color}]")
 
 
 @app.command()
@@ -1396,7 +1405,18 @@ def rebalance(
         if ra.action in (RebalanceAction.HOLD, RebalanceAction.BUY)
     ]
 
-    archived = archive_picks(date=old_date)
+    # Teilperioden-Return für TWR: gleichgewichtete Rendite aller gehaltenen Positionen
+    # Entry: Kurs am old_date, Exit: aktueller Kurs (= Rebalance-Datum)
+    period_returns = []
+    for pick in old_picks:
+        ticker = pick["ticker"]
+        entry = _fetch_price(ticker, old_date)
+        exit_ = _fetch_price(ticker, None)
+        if entry and exit_ and entry != 0:
+            period_returns.append((exit_ - entry) / entry)
+    period_return = sum(period_returns) / len(period_returns) if period_returns else None
+
+    archived = archive_picks(date=old_date, period_return=period_return)
     out_path = save_picks(new_picks, date=analysis_date)
     console.print(f"\n[green]✓ Neues Portfolio gespeichert:[/green] {out_path}")
     if archived:

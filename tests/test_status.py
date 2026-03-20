@@ -121,3 +121,72 @@ class TestPortfolioStatus:
         entries = ps.build(picks)
         spy_pct = ps.spy_pct_change(pick_date=picks["date"], price_fetcher=fetch)
         assert isinstance(spy_pct, float | type(None))
+
+
+class TestComputeTWR:
+    def test_returns_none_when_no_history(self, tmp_path):
+        from tradingagents.portfolio.status import compute_twr
+        assert compute_twr(output_dir=str(tmp_path)) is None
+
+    def test_returns_none_when_history_has_no_period_returns(self, tmp_path):
+        from tradingagents.portfolio.status import compute_twr
+        from tradingagents.portfolio.persistence import save_picks, archive_picks
+        from tradingagents.portfolio.batch_runner import PickResult
+
+        picks = [PickResult(ticker="AAPL", score=1.0, signal="BUY", decision_text="x")]
+        save_picks(picks, date="2024-01-01", output_dir=str(tmp_path))
+        archive_picks(date="2024-01-01", period_return=None, output_dir=str(tmp_path))
+        assert compute_twr(output_dir=str(tmp_path)) is None
+
+    def test_single_period(self, tmp_path):
+        from tradingagents.portfolio.status import compute_twr
+        from tradingagents.portfolio.persistence import save_picks, archive_picks
+        from tradingagents.portfolio.batch_runner import PickResult
+
+        picks = [PickResult(ticker="AAPL", score=1.0, signal="BUY", decision_text="x")]
+        save_picks(picks, date="2024-01-01", output_dir=str(tmp_path))
+        archive_picks(date="2024-01-01", period_return=0.10, output_dir=str(tmp_path))
+        twr = compute_twr(output_dir=str(tmp_path))
+        assert abs(twr - 0.10) < 0.0001
+
+    def test_two_periods_chained(self, tmp_path):
+        from tradingagents.portfolio.status import compute_twr
+        from tradingagents.portfolio.persistence import save_picks, archive_picks
+        from tradingagents.portfolio.batch_runner import PickResult
+
+        picks = [PickResult(ticker="AAPL", score=1.0, signal="BUY", decision_text="x")]
+        save_picks(picks, date="2024-01-01", output_dir=str(tmp_path))
+        archive_picks(date="2024-01-01", period_return=0.10, output_dir=str(tmp_path))
+        save_picks(picks, date="2024-02-01", output_dir=str(tmp_path))
+        archive_picks(date="2024-02-01", period_return=0.10, output_dir=str(tmp_path))
+        twr = compute_twr(output_dir=str(tmp_path))
+        # (1.1 * 1.1) - 1 = 0.21
+        assert abs(twr - 0.21) < 0.0001
+
+    def test_loss_period_reduces_twr(self, tmp_path):
+        from tradingagents.portfolio.status import compute_twr
+        from tradingagents.portfolio.persistence import save_picks, archive_picks
+        from tradingagents.portfolio.batch_runner import PickResult
+
+        picks = [PickResult(ticker="AAPL", score=1.0, signal="BUY", decision_text="x")]
+        save_picks(picks, date="2024-01-01", output_dir=str(tmp_path))
+        archive_picks(date="2024-01-01", period_return=0.20, output_dir=str(tmp_path))
+        save_picks(picks, date="2024-02-01", output_dir=str(tmp_path))
+        archive_picks(date="2024-02-01", period_return=-0.10, output_dir=str(tmp_path))
+        twr = compute_twr(output_dir=str(tmp_path))
+        # (1.2 * 0.9) - 1 = 0.08
+        assert abs(twr - 0.08) < 0.0001
+
+    def test_skips_periods_without_return(self, tmp_path):
+        from tradingagents.portfolio.status import compute_twr
+        from tradingagents.portfolio.persistence import save_picks, archive_picks
+        from tradingagents.portfolio.batch_runner import PickResult
+
+        picks = [PickResult(ticker="AAPL", score=1.0, signal="BUY", decision_text="x")]
+        save_picks(picks, date="2024-01-01", output_dir=str(tmp_path))
+        archive_picks(date="2024-01-01", period_return=0.10, output_dir=str(tmp_path))
+        save_picks(picks, date="2024-02-01", output_dir=str(tmp_path))
+        archive_picks(date="2024-02-01", period_return=None, output_dir=str(tmp_path))
+        twr = compute_twr(output_dir=str(tmp_path))
+        # Only the first period counts
+        assert abs(twr - 0.10) < 0.0001

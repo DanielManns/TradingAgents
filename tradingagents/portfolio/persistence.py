@@ -71,8 +71,18 @@ def load_picks(output_dir: str = "portfolio_data") -> PicksFile | None:
         ) from exc
 
 
-def archive_picks(date: str, output_dir: str = "portfolio_data") -> Path | None:
+def archive_picks(
+    date: str,
+    period_return: float | None = None,
+    output_dir: str = "portfolio_data",
+) -> Path | None:
     """Archiviert latest_picks.json als history/YYYY-MM-DD.json.
+
+    Args:
+        date: Datum des Portfolios (YYYY-MM-DD), wird als Dateiname verwendet.
+        period_return: Gleichgewichtete Rendite der Periode (z.B. 0.05 für +5%).
+                       None wenn Preise nicht verfügbar waren.
+        output_dir: Ausgabeverzeichnis.
 
     Returns:
         Pfad zur archivierten Datei, oder None wenn keine latest_picks.json vorhanden.
@@ -80,11 +90,14 @@ def archive_picks(date: str, output_dir: str = "portfolio_data") -> Path | None:
     latest = Path(output_dir) / PICKS_FILENAME
     try:
         content = latest.read_text()
+        data = json.loads(content)
     except FileNotFoundError:
         return None
+
+    data["period_return"] = period_return
 
     history_dir = Path(output_dir) / "history"
     history_dir.mkdir(parents=True, exist_ok=True)
     archive_file = history_dir / f"{date}.json"
-    archive_file.write_text(content)
+    archive_file.write_text(json.dumps(data, indent=2))
     return archive_file

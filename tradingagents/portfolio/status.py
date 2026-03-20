@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 
@@ -74,3 +76,37 @@ class PortfolioStatus:
         if price_then is None or price_now is None or price_then == 0:
             return None
         return round((price_now - price_then) / price_then * 100.0, 2)
+
+
+def compute_twr(output_dir: str = "portfolio_data") -> float | None:
+    """Berechnet den Time-Weighted Return (TWR) über alle archivierten Perioden.
+
+    Jede Rebalancing-Periode liefert einen Teilperioden-Return (period_return),
+    der beim Archivieren gespeichert wird. TWR verkettet diese Teilperioden:
+        TWR = (1 + r1) * (1 + r2) * ... - 1
+
+    Returns:
+        TWR als Dezimalzahl (z.B. 0.12 für +12%) oder None wenn keine
+        archivierten Perioden mit gültigen Returns vorhanden sind.
+    """
+    history_dir = Path(output_dir) / "history"
+    if not history_dir.exists():
+        return None
+
+    sub_period_returns: list[float] = []
+    for archive_file in sorted(history_dir.glob("*.json")):
+        try:
+            data = json.loads(archive_file.read_text())
+            r = data.get("period_return")
+            if r is not None:
+                sub_period_returns.append(float(r))
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+    if not sub_period_returns:
+        return None
+
+    twr = 1.0
+    for r in sub_period_returns:
+        twr *= 1.0 + r
+    return round(twr - 1.0, 4)
