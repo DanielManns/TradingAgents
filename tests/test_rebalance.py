@@ -114,9 +114,9 @@ class TestHistoryArchiving:
         new_portfolio = Portfolio(date="2024-02-01", picks=[_make_pick("MSFT", 1.0)])
         archive_rebalance(self._make_event(period_return=0.05), new_portfolio=new_portfolio, output_dir=str(tmp_path), portfolio=PORTFOLIO)
         state = load_state(output_dir=str(tmp_path), portfolio=PORTFOLIO)
-        assert len(state.snapshots) == 1
-        assert state.snapshots[0].picks[0].ticker == "MSFT"
-        assert state.snapshots[0].portfolio_return == 0.05
+        assert len(state.past_portfolios) == 1
+        assert state.past_portfolios[0].picks[0].ticker == "MSFT"
+        assert state.past_portfolios[0].portfolio_return == 0.05
 
     def test_rebalance_count_incremented(self, tmp_path):
         new_portfolio = Portfolio(date="2024-02-01", picks=[_make_pick("AAPL", 1.0)])
@@ -128,7 +128,7 @@ class TestHistoryArchiving:
         new_portfolio = Portfolio(date="2024-02-01", picks=[_make_pick("AAPL", 1.0)])
         archive_rebalance(self._make_event(period_return=None), new_portfolio=new_portfolio, output_dir=str(tmp_path), portfolio=PORTFOLIO)
         state = load_state(output_dir=str(tmp_path), portfolio=PORTFOLIO)
-        assert state.snapshots[0].portfolio_return is None
+        assert state.past_portfolios[0].portfolio_return is None
 
     def test_multiple_rebalances_accumulate(self, tmp_path):
         # First rebalance
@@ -140,9 +140,9 @@ class TestHistoryArchiving:
         archive_rebalance(self._make_event(date="2024-03-01", period_return=0.05), new_portfolio=new_portfolio2, output_dir=str(tmp_path), portfolio=PORTFOLIO)
 
         state = load_state(output_dir=str(tmp_path), portfolio=PORTFOLIO)
-        assert len(state.snapshots) == 2
-        assert state.snapshots[0].picks[0].ticker == "MSFT"
-        assert state.snapshots[1].picks[0].ticker == "GOOG"
+        assert len(state.past_portfolios) == 2
+        assert state.past_portfolios[0].picks[0].ticker == "MSFT"
+        assert state.past_portfolios[1].picks[0].ticker == "GOOG"
         assert state.rebalance_count == 2
 
 
@@ -175,18 +175,18 @@ class TestPortfolioStateModel:
     def test_empty_state(self):
         s = PortfolioState()
         assert s.current_portfolio is None
-        assert s.snapshots == []
+        assert s.past_portfolios == []
         assert s.rebalance_count == 0
 
     def test_roundtrip(self):
         current = Portfolio(date="2024-02-01", picks=[_make_pick("MSFT", 1.0)])
         snap = Portfolio(date="2024-02-01", picks=[_make_pick("AAPL", 1.0)], portfolio_return=0.10)
-        s = PortfolioState(current_portfolio=current, snapshots=[snap], rebalance_count=1)
+        s = PortfolioState(current_portfolio=current, past_portfolios=[snap], rebalance_count=1)
         data = s.model_dump()
         loaded = PortfolioState.model_validate(data)
         assert loaded.current_portfolio.picks[0].ticker == "MSFT"
-        assert loaded.snapshots[0].picks[0].ticker == "AAPL"
-        assert loaded.snapshots[0].portfolio_return == 0.10
+        assert loaded.past_portfolios[0].picks[0].ticker == "AAPL"
+        assert loaded.past_portfolios[0].portfolio_return == 0.10
         assert loaded.rebalance_count == 1
 
 

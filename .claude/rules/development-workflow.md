@@ -8,6 +8,14 @@ The Feature Implementation Workflow describes the development pipeline: research
 
 Write only the least amount of custom code necessary. If a well-maintained Python library already implements a piece of functionality, use it instead of building from scratch. Glue code and thin wrappers are preferred over reimplementation. Every ticket should start by asking: **"Is there a library that already does this?"**
 
+## Principle — Fail Loud, Never Silently
+
+Silent errors are fatal to this project. If something unexpected happens, the application must **crash with a descriptive error message** rather than swallow the error and continue. Never return `None` as a stand-in for an error condition — raise an exception instead. A traceback we can see is always better than a wrong result we can't.
+
+- **Raise, don't return `None`:** If a function cannot produce a valid result, raise a descriptive exception (e.g., `ValueError`, `KeyError`, or a custom exception). Callers should not have to guess whether `None` means "no data" or "something went wrong".
+- **No bare `except` / `except Exception: pass`:** Never catch an exception just to silence it. If you catch, either handle it meaningfully or re-raise.
+- **Assertions for invariants:** Use `assert` or explicit checks for conditions that should always hold. If they don't, something is wrong and we want to know immediately.
+
 ## Feature Implementation Workflow
 
 0. **Research & Reuse** _(mandatory before any new implementation)_

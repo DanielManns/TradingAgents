@@ -47,7 +47,7 @@ class PortfolioState(BaseModel):
     """Complete portfolio state: current holdings and historical snapshots."""
 
     current_portfolio: Portfolio | None = None
-    snapshots: list[Portfolio] = []
+    past_portfolios: list[Portfolio] = []
     rebalance_count: int = 0
 
 

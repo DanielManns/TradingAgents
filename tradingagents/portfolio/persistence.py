@@ -134,7 +134,7 @@ def archive_rebalance(
     })
     updated_state = PortfolioState(
         current_portfolio=new_portfolio,
-        snapshots=state.snapshots + [snapshot],
+        past_portfolios=state.past_portfolios + [snapshot],
         rebalance_count=state.rebalance_count + 1,
     )
     return save_state(updated_state, output_dir, portfolio)

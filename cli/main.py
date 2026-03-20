@@ -33,10 +33,10 @@ from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.portfolio.universe import UNIVERSE
 from tradingagents.portfolio.batch_runner import BatchRunner
 from tradingagents.portfolio.models import MAX_PICKS, Pick, Portfolio, RebalanceAction, RebalanceEvent
-from tradingagents.portfolio.persistence import save_portfolio, load_portfolio, archive_rebalance
+from tradingagents.portfolio.persistence import save_portfolio, load_portfolio, load_state, archive_rebalance
 from tradingagents.portfolio.rebalancer import Rebalancer
 from tradingagents.portfolio.scorer import KeywordScorer
-from tradingagents.portfolio.status import PortfolioStatus, compute_twr
+from tradingagents.portfolio.status import PortfolioEvaluator, HistoricalEvaluator
 from cli.models import AnalystType
 from cli.utils import *
 from cli.announcements import fetch_announcements, display_announcements
@@ -1335,30 +1335,36 @@ def status(
     portfolio: str = typer.Option("default", "--portfolio", "-p", help="Portfolio-Name (Unterordner)."),
 ):
     """Zeigt aktuellen Portfolio-Stand mit Performance vs. SPY-Benchmark."""
-    current = load_portfolio(portfolio=portfolio)
+    state = load_state(portfolio=portfolio)
+    current = state.current_portfolio
     if current is None:
         console.print("[red]No portfolio found. Please run `tradingagents pick` first.[/red]")
         raise typer.Exit(code=1)
 
-    ps = PortfolioStatus(price_fetcher=_fetch_price)
-
     with console.status("[bold blue]Loading current prices...[/bold blue]"):
-        entries = ps.build(current)
-        avg_pct = ps.portfolio_avg_pct(entries)
-        spy_pct = ps.spy_pct_change(pick_date=current.date)
-        twr = compute_twr(portfolio=portfolio)
+        picks, portfolio_return, spy_return = PortfolioEvaluator(price_fetcher=_fetch_price).evaluate(current)
+        evaluated = current.model_copy(update={
+            "picks": picks,
+            "portfolio_return": portfolio_return,
+            "spy_return": spy_return,
+        })
+        twr = HistoricalEvaluator.evaluate(state, current_portfolio=evaluated)
 
-    pick_date = current.date
-    console.print(_build_status_table(entries, pick_date))
+    # Pick-level: individual performance table
+    console.print(_build_status_table(evaluated.picks, evaluated.date))
 
+    # Portfolio-level: aggregate metrics
+    avg_pct = portfolio_return or 0.0
     avg_color = "green" if avg_pct >= 0 else "red"
     console.print(f"\nPortfolio Ø Performance: [{avg_color}]{avg_pct:+.1f}%[/{avg_color}]")
-    if spy_pct is not None:
-        spy_color = "green" if spy_pct >= 0 else "red"
-        console.print(f"SPY Benchmark:           [{spy_color}]{spy_pct:+.1f}%[/{spy_color}]")
-        diff = avg_pct - spy_pct
+    if spy_return is not None:
+        spy_color = "green" if spy_return >= 0 else "red"
+        console.print(f"SPY Benchmark:           [{spy_color}]{spy_return:+.1f}%[/{spy_color}]")
+        diff = avg_pct - spy_return
         diff_color = "green" if diff >= 0 else "red"
         console.print(f"Alpha vs. SPY:           [{diff_color}]{diff:+.1f}%[/{diff_color}]")
+
+    # Historical-level: all-time TWR
     if twr is not None:
         twr_pct = twr * 100
         twr_color = "green" if twr_pct >= 0 else "red"
@@ -1366,11 +1372,11 @@ def status(
 
     # Persist enriched picks and aggregate metrics back to state.json
     save_portfolio(
-        entries,
-        date=current.date,
+        evaluated.picks,
+        date=evaluated.date,
         portfolio=portfolio,
-        portfolio_return=round(avg_pct, 2),
-        spy_return=spy_pct,
+        portfolio_return=evaluated.portfolio_return,
+        spy_return=evaluated.spy_return,
         twr=twr,
     )
     console.print(f"\n[dim]state.json aktualisiert mit Live-Kursen.[/dim]")
