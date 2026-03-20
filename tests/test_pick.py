@@ -3,29 +3,33 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock
+
 import pytest
 
-from tradingagents.portfolio.scorer import KeywordScorer
 from tradingagents.portfolio.batch_runner import BatchRunner
 from tradingagents.portfolio.models import Pick
-from tradingagents.portfolio.persistence import save_portfolio, load_portfolio
-
+from tradingagents.portfolio.persistence import load_portfolio, save_portfolio
+from tradingagents.portfolio.scorer import KeywordScorer
 
 # ---------------------------------------------------------------------------
 # Scorer tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("signal,expected", [
-    ("BUY", 1.0),
-    ("buy", 1.0),
-    ("  BUY  ", 1.0),
-    ("SELL", -1.0),
-    ("sell", -1.0),
-    ("HOLD", 0.0),
-    ("hold", 0.0),
-    ("UNKNOWN", 0.0),
-    ("", 0.0),
-])
+
+@pytest.mark.parametrize(
+    "signal,expected",
+    [
+        ("BUY", 1.0),
+        ("buy", 1.0),
+        ("  BUY  ", 1.0),
+        ("SELL", -1.0),
+        ("sell", -1.0),
+        ("HOLD", 0.0),
+        ("hold", 0.0),
+        ("UNKNOWN", 0.0),
+        ("", 0.0),
+    ],
+)
 def test_keyword_scorer(signal: str, expected: float):
     assert KeywordScorer().score(signal) == expected
 
@@ -42,11 +46,13 @@ def test_keyword_scorer_no_substring_false_positives(signal: str):
 # BatchRunner tests
 # ---------------------------------------------------------------------------
 
+
 class TestBatchRunner:
     def _make_propagate_fn(self, signal_map: dict):
         def propagate_fn(ticker: str, date: str):
             signal = signal_map.get(ticker, "HOLD")
             return {"final_trade_decision": f"Decision: {signal}"}, signal
+
         return propagate_fn
 
     def test_run_returns_correct_number_of_results(self):
@@ -140,6 +146,7 @@ class TestBatchRunner:
 # Persistence tests
 # ---------------------------------------------------------------------------
 
+
 class TestPersistence:
     def test_save_and_load_roundtrip(self, tmp_path):
         picks = [
@@ -183,8 +190,16 @@ class TestPersistence:
         assert files[0].name == "state.json"
 
     def test_save_overwrites_previous_file(self, tmp_path):
-        save_portfolio([Pick(ticker="AAPL", score=1.0, signal="BUY", decision_text="x")], date="2024-01-01", output_dir=str(tmp_path))
-        save_portfolio([Pick(ticker="MSFT", score=0.0, signal="HOLD", decision_text="y")], date="2024-01-08", output_dir=str(tmp_path))
+        save_portfolio(
+            [Pick(ticker="AAPL", score=1.0, signal="BUY", decision_text="x")],
+            date="2024-01-01",
+            output_dir=str(tmp_path),
+        )
+        save_portfolio(
+            [Pick(ticker="MSFT", score=0.0, signal="HOLD", decision_text="y")],
+            date="2024-01-08",
+            output_dir=str(tmp_path),
+        )
         loaded = load_portfolio(output_dir=str(tmp_path))
         assert len(loaded.picks) == 1
         assert loaded.picks[0].ticker == "MSFT"

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
@@ -23,7 +24,7 @@ class BatchRunner:
         propagate_fn: Callable[[str, str], tuple],
         scorer: BaseScorer | None = None,
         delay_seconds: float = 0.0,
-        cache: "AnalysisCache | None" = None,
+        cache: AnalysisCache | None = None,
         console: Console | None = None,
     ):
         self.propagate_fn = propagate_fn
@@ -60,12 +61,14 @@ class BatchRunner:
                             signal = cached["signal"]
                             final_state = cached["final_state"]
                             progress.advance(task)
-                            results.append(Pick(
-                                ticker=ticker,
-                                score=self.scorer.score(signal),
-                                signal=signal,
-                                decision_text=final_state.get("final_trade_decision", ""),
-                            ))
+                            results.append(
+                                Pick(
+                                    ticker=ticker,
+                                    score=self.scorer.score(signal),
+                                    signal=signal,
+                                    decision_text=final_state.get("final_trade_decision", ""),
+                                )
+                            )
                             continue
 
                     final_state, signal = self.propagate_fn(ticker, date)
@@ -74,12 +77,14 @@ class BatchRunner:
                     if self.cache is not None:
                         self.cache.put(ticker, date, final_state, signal)
 
-                    results.append(Pick(
-                        ticker=ticker,
-                        score=self.scorer.score(signal),
-                        signal=signal,
-                        decision_text=decision_text,
-                    ))
+                    results.append(
+                        Pick(
+                            ticker=ticker,
+                            score=self.scorer.score(signal),
+                            signal=signal,
+                            decision_text=decision_text,
+                        )
+                    )
                 except Exception as exc:
                     failures += 1
                     self._console.print(f"[yellow]⚠ {ticker} skipped: {exc}[/yellow]")
@@ -91,10 +96,7 @@ class BatchRunner:
                     time.sleep(self.delay_seconds)
 
         if tickers and failures > len(tickers) // 2:
-            raise RuntimeError(
-                f"{failures}/{len(tickers)} analyses failed. "
-                "Please check API key and connection."
-            )
+            raise RuntimeError(f"{failures}/{len(tickers)} analyses failed. Please check API key and connection.")
 
         results.sort(key=lambda r: (-r.score, r.ticker))
         return results

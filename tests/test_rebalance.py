@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
-from tradingagents.portfolio.models import MAX_PICKS, Pick, Portfolio, PortfolioState, RebalanceAction, RebalanceEntry, RebalanceEvent
-from tradingagents.portfolio.persistence import save_portfolio, load_portfolio, load_state, archive_rebalance
+from tradingagents.portfolio.models import (
+    MAX_PICKS,
+    Pick,
+    Portfolio,
+    PortfolioState,
+    RebalanceAction,
+    RebalanceEntry,
+    RebalanceEvent,
+)
+from tradingagents.portfolio.persistence import archive_rebalance, load_portfolio, load_state, save_portfolio
 from tradingagents.portfolio.rebalancer import Rebalancer
 
 PORTFOLIO = "test"
@@ -21,6 +27,7 @@ def _make_pick(ticker: str, score: float, signal: str = "BUY") -> Pick:
 # RebalanceAction enum
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("action", [RebalanceAction.HOLD, RebalanceAction.SELL, RebalanceAction.BUY])
 def test_rebalance_action_enum_values_exist(action):
     assert action
@@ -29,6 +36,7 @@ def test_rebalance_action_enum_values_exist(action):
 # ---------------------------------------------------------------------------
 # RebalanceEntry
 # ---------------------------------------------------------------------------
+
 
 def test_rebalance_entry_fields():
     pick = _make_pick("AAPL", 1.0)
@@ -43,6 +51,7 @@ def test_rebalance_entry_fields():
 # Rebalancer core logic
 # ---------------------------------------------------------------------------
 
+
 class TestRebalancer:
     """Tests for the rebalancing logic."""
 
@@ -51,20 +60,29 @@ class TestRebalancer:
 
     def test_hold_when_score_unchanged(self):
         old_picks = [_make_pick("AAPL", 1.0), _make_pick("MSFT", 0.0, "HOLD")]
-        actions = {r.pick.ticker: r.action for r in self._rb().compute(old_picks, {"AAPL": 1.0, "MSFT": 0.0, "NVDA": 0.1}, top_n=2)}
+        actions = {
+            r.pick.ticker: r.action
+            for r in self._rb().compute(old_picks, {"AAPL": 1.0, "MSFT": 0.0, "NVDA": 0.1}, top_n=2)
+        }
         assert actions["AAPL"] == RebalanceAction.HOLD
         assert actions["MSFT"] == RebalanceAction.HOLD
 
     def test_sell_and_buy_when_improvement_exceeds_hurdle(self):
         old_picks = [_make_pick("AAPL", 1.0), _make_pick("MSFT", 0.0, "HOLD")]
-        actions = {r.pick.ticker: r.action for r in self._rb().compute(old_picks, {"AAPL": 1.0, "MSFT": 0.0, "NVDA": 1.0}, top_n=2)}
+        actions = {
+            r.pick.ticker: r.action
+            for r in self._rb().compute(old_picks, {"AAPL": 1.0, "MSFT": 0.0, "NVDA": 1.0}, top_n=2)
+        }
         assert actions["AAPL"] == RebalanceAction.HOLD
         assert actions["MSFT"] == RebalanceAction.SELL
         assert actions["NVDA"] == RebalanceAction.BUY
 
     def test_no_replace_when_improvement_below_hurdle(self):
         old_picks = [_make_pick("AAPL", 1.0), _make_pick("MSFT", 0.0, "HOLD")]
-        actions = {r.pick.ticker: r.action for r in self._rb(min_improvement=0.5).compute(old_picks, {"AAPL": 1.0, "MSFT": 0.0, "NVDA": 0.2}, top_n=2)}
+        actions = {
+            r.pick.ticker: r.action
+            for r in self._rb(min_improvement=0.5).compute(old_picks, {"AAPL": 1.0, "MSFT": 0.0, "NVDA": 0.2}, top_n=2)
+        }
         assert RebalanceAction.SELL not in actions.values()
         assert RebalanceAction.BUY not in actions.values()
 
@@ -85,6 +103,7 @@ class TestRebalancer:
     def test_top_n_defaults_to_max_picks(self):
         rb = self._rb()
         import inspect
+
         sig = inspect.signature(rb.compute)
         assert sig.parameters["top_n"].default == MAX_PICKS
 
@@ -93,26 +112,40 @@ class TestRebalancer:
 # Persistence: archive_rebalance
 # ---------------------------------------------------------------------------
 
+
 class TestHistoryArchiving:
-    def _make_event(self, date: str = "2024-01-01", period_return: float | None = None, entries: list[RebalanceEntry] | None = None) -> RebalanceEvent:
+    def _make_event(
+        self, date: str = "2024-01-01", period_return: float | None = None, entries: list[RebalanceEntry] | None = None
+    ) -> RebalanceEvent:
         if entries is None:
-            entries = [RebalanceEntry(pick=_make_pick("AAPL", 1.0), action=RebalanceAction.HOLD, old_score=1.0, new_score=1.0)]
+            entries = [
+                RebalanceEntry(pick=_make_pick("AAPL", 1.0), action=RebalanceAction.HOLD, old_score=1.0, new_score=1.0)
+            ]
         return RebalanceEvent(date=date, entries=entries, period_return=period_return)
 
     def test_archive_creates_state_json(self, tmp_path):
         new_portfolio = Portfolio(date="2024-02-01", picks=[_make_pick("AAPL", 1.0)])
-        archive_rebalance(self._make_event(), new_portfolio=new_portfolio, output_dir=str(tmp_path), portfolio=PORTFOLIO)
+        archive_rebalance(
+            self._make_event(), new_portfolio=new_portfolio, output_dir=str(tmp_path), portfolio=PORTFOLIO
+        )
         assert (tmp_path / PORTFOLIO / "state.json").exists()
 
     def test_archive_updates_current_portfolio(self, tmp_path):
         new_portfolio = Portfolio(date="2024-02-01", picks=[_make_pick("MSFT", 1.0)])
-        archive_rebalance(self._make_event(), new_portfolio=new_portfolio, output_dir=str(tmp_path), portfolio=PORTFOLIO)
+        archive_rebalance(
+            self._make_event(), new_portfolio=new_portfolio, output_dir=str(tmp_path), portfolio=PORTFOLIO
+        )
         loaded = load_portfolio(output_dir=str(tmp_path), portfolio=PORTFOLIO)
         assert loaded.picks[0].ticker == "MSFT"
 
     def test_snapshot_appended_to_state(self, tmp_path):
         new_portfolio = Portfolio(date="2024-02-01", picks=[_make_pick("MSFT", 1.0)])
-        archive_rebalance(self._make_event(period_return=0.05), new_portfolio=new_portfolio, output_dir=str(tmp_path), portfolio=PORTFOLIO)
+        archive_rebalance(
+            self._make_event(period_return=0.05),
+            new_portfolio=new_portfolio,
+            output_dir=str(tmp_path),
+            portfolio=PORTFOLIO,
+        )
         state = load_state(output_dir=str(tmp_path), portfolio=PORTFOLIO)
         assert len(state.past_portfolios) == 1
         assert state.past_portfolios[0].picks[0].ticker == "MSFT"
@@ -120,24 +153,41 @@ class TestHistoryArchiving:
 
     def test_rebalance_count_incremented(self, tmp_path):
         new_portfolio = Portfolio(date="2024-02-01", picks=[_make_pick("AAPL", 1.0)])
-        archive_rebalance(self._make_event(), new_portfolio=new_portfolio, output_dir=str(tmp_path), portfolio=PORTFOLIO)
+        archive_rebalance(
+            self._make_event(), new_portfolio=new_portfolio, output_dir=str(tmp_path), portfolio=PORTFOLIO
+        )
         state = load_state(output_dir=str(tmp_path), portfolio=PORTFOLIO)
         assert state.rebalance_count == 1
 
     def test_none_period_return_stored_on_snapshot(self, tmp_path):
         new_portfolio = Portfolio(date="2024-02-01", picks=[_make_pick("AAPL", 1.0)])
-        archive_rebalance(self._make_event(period_return=None), new_portfolio=new_portfolio, output_dir=str(tmp_path), portfolio=PORTFOLIO)
+        archive_rebalance(
+            self._make_event(period_return=None),
+            new_portfolio=new_portfolio,
+            output_dir=str(tmp_path),
+            portfolio=PORTFOLIO,
+        )
         state = load_state(output_dir=str(tmp_path), portfolio=PORTFOLIO)
         assert state.past_portfolios[0].portfolio_return is None
 
     def test_multiple_rebalances_accumulate(self, tmp_path):
         # First rebalance
         new_portfolio1 = Portfolio(date="2024-02-01", picks=[_make_pick("MSFT", 1.0)])
-        archive_rebalance(self._make_event(period_return=0.10), new_portfolio=new_portfolio1, output_dir=str(tmp_path), portfolio=PORTFOLIO)
+        archive_rebalance(
+            self._make_event(period_return=0.10),
+            new_portfolio=new_portfolio1,
+            output_dir=str(tmp_path),
+            portfolio=PORTFOLIO,
+        )
 
         # Second rebalance
         new_portfolio2 = Portfolio(date="2024-03-01", picks=[_make_pick("GOOG", 1.0)])
-        archive_rebalance(self._make_event(date="2024-03-01", period_return=0.05), new_portfolio=new_portfolio2, output_dir=str(tmp_path), portfolio=PORTFOLIO)
+        archive_rebalance(
+            self._make_event(date="2024-03-01", period_return=0.05),
+            new_portfolio=new_portfolio2,
+            output_dir=str(tmp_path),
+            portfolio=PORTFOLIO,
+        )
 
         state = load_state(output_dir=str(tmp_path), portfolio=PORTFOLIO)
         assert len(state.past_portfolios) == 2
@@ -149,6 +199,7 @@ class TestHistoryArchiving:
 # ---------------------------------------------------------------------------
 # Portfolio validation
 # ---------------------------------------------------------------------------
+
 
 class TestPortfolioValidation:
     def test_portfolio_accepts_max_picks(self):
@@ -170,6 +221,7 @@ class TestPortfolioValidation:
 # ---------------------------------------------------------------------------
 # PortfolioHistory model
 # ---------------------------------------------------------------------------
+
 
 class TestPortfolioStateModel:
     def test_empty_state(self):
@@ -193,6 +245,7 @@ class TestPortfolioStateModel:
 # ---------------------------------------------------------------------------
 # Portfolio isolation
 # ---------------------------------------------------------------------------
+
 
 class TestPortfolioIsolation:
     """Two portfolios must not interfere with each other."""

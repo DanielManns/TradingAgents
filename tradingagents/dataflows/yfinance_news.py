@@ -1,7 +1,8 @@
 """yfinance-based news data fetching functions."""
 
-import yfinance as yf
 from datetime import datetime
+
+import yfinance as yf
 from dateutil.relativedelta import relativedelta
 
 
@@ -120,6 +121,7 @@ def get_global_news_yfinance(
     """
     if look_back_days is None:
         from tradingagents.dataflows.config import get_config
+
         look_back_days = get_config().get("news_lookback_days", 30)
 
     # Search queries for macro/global news

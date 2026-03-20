@@ -55,20 +55,24 @@ class Rebalancer:
 
         for ticker in holdings:
             action = RebalanceAction.SELL if ticker in replaced else RebalanceAction.HOLD
-            results.append(RebalanceEntry(
-                pick=old_by_ticker[ticker],
-                action=action,
-                old_score=old_by_ticker[ticker].score,
-                new_score=holding_new_scores[ticker],
-            ))
+            results.append(
+                RebalanceEntry(
+                    pick=old_by_ticker[ticker],
+                    action=action,
+                    old_score=old_by_ticker[ticker].score,
+                    new_score=holding_new_scores[ticker],
+                )
+            )
 
         for ticker in bought:
-            results.append(RebalanceEntry(
-                pick=Pick(ticker=ticker),
-                action=RebalanceAction.BUY,
-                old_score=0.0,
-                new_score=new_scores[ticker],
-            ))
+            results.append(
+                RebalanceEntry(
+                    pick=Pick(ticker=ticker),
+                    action=RebalanceAction.BUY,
+                    old_score=0.0,
+                    new_score=new_scores[ticker],
+                )
+            )
 
         keepers = sorted(
             [r for r in results if r.action in (RebalanceAction.HOLD, RebalanceAction.BUY)],
@@ -83,11 +87,13 @@ class Rebalancer:
             elif r.pick.ticker in keeper_tickers:
                 final.append(r)
             else:
-                final.append(RebalanceEntry(
-                    pick=r.pick,
-                    action=RebalanceAction.SELL,
-                    old_score=r.old_score,
-                    new_score=r.new_score,
-                ))
+                final.append(
+                    RebalanceEntry(
+                        pick=r.pick,
+                        action=RebalanceAction.SELL,
+                        old_score=r.old_score,
+                        new_score=r.new_score,
+                    )
+                )
 
         return final

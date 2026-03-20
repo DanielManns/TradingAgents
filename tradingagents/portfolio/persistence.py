@@ -26,6 +26,7 @@ def _write_json(path: Path, data: dict) -> None:
 # PortfolioState (state.json)
 # ---------------------------------------------------------------------------
 
+
 def save_state(
     state: PortfolioState,
     output_dir: str = "portfolio_data",
@@ -57,14 +58,13 @@ def load_state(
     except FileNotFoundError:
         return PortfolioState()
     except (json.JSONDecodeError, Exception) as exc:
-        raise ValueError(
-            f"State file '{file_path}' is corrupted or has an unknown format: {exc}"
-        ) from exc
+        raise ValueError(f"State file '{file_path}' is corrupted or has an unknown format: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
 # Convenience: save / load current portfolio
 # ---------------------------------------------------------------------------
+
 
 def save_portfolio(
     picks: list[Pick],
@@ -110,6 +110,7 @@ def load_portfolio(
 # Rebalance: updates current_portfolio and appends snapshot
 # ---------------------------------------------------------------------------
 
+
 def archive_rebalance(
     event: RebalanceEvent,
     new_portfolio: Portfolio,
@@ -129,9 +130,11 @@ def archive_rebalance(
     """
     state = load_state(output_dir, portfolio)
 
-    snapshot = new_portfolio.model_copy(update={
-        "portfolio_return": event.period_return,
-    })
+    snapshot = new_portfolio.model_copy(
+        update={
+            "portfolio_return": event.period_return,
+        }
+    )
     updated_state = PortfolioState(
         current_portfolio=new_portfolio,
         past_portfolios=state.past_portfolios + [snapshot],

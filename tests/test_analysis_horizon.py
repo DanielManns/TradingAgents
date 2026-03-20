@@ -1,28 +1,31 @@
 """Unit tests for Ticket 2: Configurable Analysis Time Horizon."""
 
 import inspect
-
-import pytest
 from unittest.mock import MagicMock, patch
 
-from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.graph.propagation import Propagator
-from tradingagents.graph.trading_graph import TradingAgentsGraph
+import pytest
+
 from tradingagents.agents.analysts.fundamentals_analyst import create_fundamentals_analyst
 from tradingagents.agents.analysts.news_analyst import create_news_analyst
 from tradingagents.agents.analysts.social_media_analyst import create_social_media_analyst
-from tradingagents.dataflows.yfinance_news import get_global_news_yfinance
-from tradingagents.dataflows.alpha_vantage_news import get_global_news as av_get_global_news
 from tradingagents.agents.utils.news_data_tools import get_global_news as tool_get_global_news
+from tradingagents.dataflows.alpha_vantage_news import get_global_news as av_get_global_news
+from tradingagents.dataflows.yfinance_news import get_global_news_yfinance
+from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.graph.propagation import Propagator
+from tradingagents.graph.trading_graph import TradingAgentsGraph
 
 
 class TestDefaultConfig:
     """Tests for new config keys."""
 
-    @pytest.mark.parametrize("key,expected", [
-        ("analysis_period", "past month"),
-        ("news_lookback_days", 30),
-    ])
+    @pytest.mark.parametrize(
+        "key,expected",
+        [
+            ("analysis_period", "past month"),
+            ("news_lookback_days", 30),
+        ],
+    )
     def test_config_defaults(self, key, expected):
         assert DEFAULT_CONFIG[key] == expected
 
@@ -48,11 +51,14 @@ class TestPropagatorAnalysisPeriod:
 class TestAnalystPromptInterpolation:
     """Tests that analysts read analysis_period from state and use it in prompts."""
 
-    @pytest.mark.parametrize("create_fn", [
-        create_fundamentals_analyst,
-        create_news_analyst,
-        create_social_media_analyst,
-    ])
+    @pytest.mark.parametrize(
+        "create_fn",
+        [
+            create_fundamentals_analyst,
+            create_news_analyst,
+            create_social_media_analyst,
+        ],
+    )
     def test_analyst_uses_analysis_period_and_no_hardcoded_past_week(self, create_fn):
         node = create_fn(MagicMock())
         src = inspect.getsource(node)
@@ -63,11 +69,15 @@ class TestAnalystPromptInterpolation:
 class TestNewsLookbackDefaults:
     """Tests that look_back_days defaults to None so config drives the value."""
 
-    @pytest.mark.parametrize("fn,attr", [
-        (get_global_news_yfinance, "look_back_days"),
-        (av_get_global_news, "look_back_days"),
-        (tool_get_global_news.func, "look_back_days"),
-    ], ids=["yfinance", "alpha_vantage", "tool"])
+    @pytest.mark.parametrize(
+        "fn,attr",
+        [
+            (get_global_news_yfinance, "look_back_days"),
+            (av_get_global_news, "look_back_days"),
+            (tool_get_global_news.func, "look_back_days"),
+        ],
+        ids=["yfinance", "alpha_vantage", "tool"],
+    )
     def test_look_back_days_default_is_none(self, fn, attr):
         assert inspect.signature(fn).parameters[attr].default is None
 

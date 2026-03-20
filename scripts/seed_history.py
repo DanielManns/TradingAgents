@@ -19,7 +19,7 @@ from tradingagents.portfolio.models import (
     RebalanceEntry,
     RebalanceEvent,
 )
-from tradingagents.portfolio.persistence import save_portfolio, archive_rebalance
+from tradingagents.portfolio.persistence import archive_rebalance, save_portfolio
 
 PORTFOLIO = "default"
 
@@ -34,16 +34,36 @@ _rebalance_1 = RebalanceEvent(
     date="2026-03-01",
     entries=[
         RebalanceEntry(
-            pick=Pick(ticker="AAPL", score=0.0, signal="SELL", decision_text="Taking profits", exit_date="2026-03-01", exit_price=185.0),
-            action=RebalanceAction.SELL, old_score=1.0, new_score=0.0,
+            pick=Pick(
+                ticker="AAPL",
+                score=0.0,
+                signal="SELL",
+                decision_text="Taking profits",
+                exit_date="2026-03-01",
+                exit_price=185.0,
+            ),
+            action=RebalanceAction.SELL,
+            old_score=1.0,
+            new_score=0.0,
         ),
         RebalanceEntry(
-            pick=Pick(ticker="NVDA", score=1.0, signal="BUY", decision_text="AI tailwind", entry_date="2026-03-01", entry_price=780.0),
-            action=RebalanceAction.BUY, old_score=0.0, new_score=1.0,
+            pick=Pick(
+                ticker="NVDA",
+                score=1.0,
+                signal="BUY",
+                decision_text="AI tailwind",
+                entry_date="2026-03-01",
+                entry_price=780.0,
+            ),
+            action=RebalanceAction.BUY,
+            old_score=0.0,
+            new_score=1.0,
         ),
         RebalanceEntry(
             pick=Pick(ticker="MSFT", score=0.0, signal="HOLD", decision_text="Hold steady"),
-            action=RebalanceAction.HOLD, old_score=0.0, new_score=0.0,
+            action=RebalanceAction.HOLD,
+            old_score=0.0,
+            new_score=0.0,
         ),
     ],
     period_return=0.08,
@@ -52,7 +72,14 @@ _rebalance_1 = RebalanceEvent(
 _portfolio_after_reb1 = Portfolio(
     date="2026-03-01",
     picks=[
-        Pick(ticker="NVDA", score=1.0, signal="BUY", decision_text="AI tailwind", entry_date="2026-03-01", entry_price=780.0),
+        Pick(
+            ticker="NVDA",
+            score=1.0,
+            signal="BUY",
+            decision_text="AI tailwind",
+            entry_date="2026-03-01",
+            entry_price=780.0,
+        ),
         Pick(ticker="MSFT", score=0.0, signal="HOLD", decision_text="Hold steady"),
     ],
 )
@@ -62,16 +89,36 @@ _rebalance_2 = RebalanceEvent(
     date="2026-03-20",
     entries=[
         RebalanceEntry(
-            pick=Pick(ticker="MSFT", score=0.0, signal="SELL", decision_text="Rotate out", exit_date="2026-03-20", exit_price=410.0),
-            action=RebalanceAction.SELL, old_score=0.0, new_score=0.0,
+            pick=Pick(
+                ticker="MSFT",
+                score=0.0,
+                signal="SELL",
+                decision_text="Rotate out",
+                exit_date="2026-03-20",
+                exit_price=410.0,
+            ),
+            action=RebalanceAction.SELL,
+            old_score=0.0,
+            new_score=0.0,
         ),
         RebalanceEntry(
-            pick=Pick(ticker="AAPL", score=1.0, signal="BUY", decision_text="Strong buy", entry_date="2026-03-20", entry_price=190.0),
-            action=RebalanceAction.BUY, old_score=0.0, new_score=1.0,
+            pick=Pick(
+                ticker="AAPL",
+                score=1.0,
+                signal="BUY",
+                decision_text="Strong buy",
+                entry_date="2026-03-20",
+                entry_price=190.0,
+            ),
+            action=RebalanceAction.BUY,
+            old_score=0.0,
+            new_score=1.0,
         ),
         RebalanceEntry(
             pick=Pick(ticker="NVDA", score=1.0, signal="BUY", decision_text="Strong buy"),
-            action=RebalanceAction.HOLD, old_score=1.0, new_score=1.0,
+            action=RebalanceAction.HOLD,
+            old_score=1.0,
+            new_score=1.0,
         ),
     ],
     period_return=-0.04,
@@ -81,7 +128,14 @@ _rebalance_2 = RebalanceEvent(
 _current = Portfolio(
     date="2026-03-20",
     picks=[
-        Pick(ticker="AAPL", score=1.0, signal="BUY", decision_text="Strong buy", entry_date="2026-03-20", entry_price=190.0),
+        Pick(
+            ticker="AAPL",
+            score=1.0,
+            signal="BUY",
+            decision_text="Strong buy",
+            entry_date="2026-03-20",
+            entry_price=190.0,
+        ),
         Pick(ticker="NVDA", score=1.0, signal="BUY", decision_text="Strong buy"),
     ],
 )
@@ -90,7 +144,7 @@ _current = Portfolio(
 def seed(output_dir: str, portfolio: str) -> None:
     # 1. Write initial portfolio
     save_portfolio(_pick_1_picks, date="2026-02-01", output_dir=output_dir, portfolio=portfolio)
-    print(f"  written: state.json (initial picks)")
+    print("  written: state.json (initial picks)")
 
     # 2. First rebalance
     archive_rebalance(_rebalance_1, new_portfolio=_portfolio_after_reb1, output_dir=output_dir, portfolio=portfolio)
