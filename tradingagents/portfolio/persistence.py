@@ -40,6 +40,7 @@ def save_picks(
                 "score": p.score,
                 "signal": p.signal,
                 "decision_text": p.decision_text,
+                "entry_price": p.entry_price,
             }
             for p in picks
         ],

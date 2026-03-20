@@ -21,6 +21,7 @@ class PickResult:
     score: float
     signal: str
     decision_text: str
+    entry_price: float | None = None
 
 
 class BatchRunner:

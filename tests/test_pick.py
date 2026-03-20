@@ -180,3 +180,15 @@ class TestPersistence:
         loaded = load_picks(output_dir=str(tmp_path))
         assert len(loaded["picks"]) == 1
         assert loaded["picks"][0]["ticker"] == "MSFT"
+
+    def test_entry_price_stored_and_loaded(self, tmp_path):
+        picks = [PickResult(ticker="AAPL", score=1.0, signal="BUY", decision_text="x", entry_price=213.49)]
+        save_picks(picks, date="2024-01-01", output_dir=str(tmp_path))
+        loaded = load_picks(output_dir=str(tmp_path))["picks"][0]
+        assert loaded["entry_price"] == 213.49
+
+    def test_entry_price_none_when_not_provided(self, tmp_path):
+        picks = [PickResult(ticker="AAPL", score=1.0, signal="BUY", decision_text="x")]
+        save_picks(picks, date="2024-01-01", output_dir=str(tmp_path))
+        loaded = load_picks(output_dir=str(tmp_path))["picks"][0]
+        assert loaded["entry_price"] is None

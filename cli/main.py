@@ -1314,7 +1314,16 @@ def pick(
     console.print(f"Analysiere {len(UNIVERSE)} Aktien, wähle Top {top_n} aus...\n")
 
     results = BatchRunner(propagate_fn=_make_propagate_fn(dry_run), delay_seconds=delay).run(UNIVERSE, analysis_date)
-    top_picks = results[:top_n]
+    top_picks = [
+        PickResult(
+            ticker=r.ticker,
+            score=r.score,
+            signal=r.signal,
+            decision_text=r.decision_text,
+            entry_price=_fetch_price(r.ticker, analysis_date),
+        )
+        for r in results[:top_n]
+    ]
 
     console.print(_build_picks_table(top_picks, top_n, analysis_date))
     console.print(f"\n[dim]{len(results)} Aktien analysiert, Top {top_n} gespeichert.[/dim]")
