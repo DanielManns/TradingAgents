@@ -13,8 +13,8 @@ DEFAULT_CONFIG = {
     "quick_think_llm": "qwen3:latest",
     "backend_url": "http://localhost:11434/v1",
     # Provider-specific thinking configuration
-    "google_thinking_level": None,      # "high", "minimal", etc.
-    "openai_reasoning_effort": None,    # "medium", "high", "low"
+    "google_thinking_level": None,  # "high", "minimal", etc.
+    "openai_reasoning_effort": None,  # "medium", "high", "low"
     # Analysis time horizon settings
     "analysis_period": "past month",
     "news_lookback_days": 30,
@@ -25,10 +25,10 @@ DEFAULT_CONFIG = {
     # Data vendor configuration
     # Category-level configuration (default for all tools in category)
     "data_vendors": {
-        "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance
+        "core_stock_apis": "yfinance",  # Options: alpha_vantage, yfinance
         "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance
-        "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance
-        "news_data": "yfinance",             # Options: alpha_vantage, yfinance
+        "fundamental_data": "yfinance",  # Options: alpha_vantage, yfinance
+        "news_data": "yfinance",  # Options: alpha_vantage, yfinance
     },
     # Tool-level configuration (takes precedence over category-level)
     "tool_vendors": {

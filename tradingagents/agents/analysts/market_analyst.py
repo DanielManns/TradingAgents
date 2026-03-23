@@ -1,16 +1,14 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-import time
-import json
-from tradingagents.agents.utils.agent_utils import get_stock_data, get_indicators
-from tradingagents.dataflows.config import get_config
+
+from tradingagents.agents.utils.core_stock_tools import get_stock_data
+from tradingagents.agents.utils.technical_indicators_tools import get_indicators
 
 
 def create_market_analyst(llm):
-
     def market_analyst_node(state):
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
-        company_name = state["company_of_interest"]
+        state["company_of_interest"]
 
         tools = [
             get_stock_data,

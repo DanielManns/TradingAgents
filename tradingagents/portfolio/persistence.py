@@ -1,90 +1,143 @@
-"""Persistenz für Portfolio-Picks (JSON-basiert)."""
+"""Persistence for portfolio state (JSON-based).
+
+Each portfolio lives in its own subdirectory under output_dir:
+    <output_dir>/<portfolio>/
+        state.json   -- unified portfolio state (current + history)
+"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TypedDict
 
-from tradingagents.portfolio.batch_runner import PickResult
-
-PICKS_FILENAME = "latest_picks.json"
+from tradingagents.portfolio.models import Pick, Portfolio, PortfolioState, RebalanceEvent
 
 
-class PickEntry(TypedDict):
-    ticker: str
-    score: float
-    signal: str
-    decision_text: str
+def _portfolio_dir(output_dir: str, portfolio: str) -> Path:
+    return Path(output_dir) / portfolio
 
 
-class PicksFile(TypedDict):
-    date: str
-    picks: list[PickEntry]
+def _write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2))
 
 
-def save_picks(
-    picks: list[PickResult],
+# ---------------------------------------------------------------------------
+# PortfolioState (state.json)
+# ---------------------------------------------------------------------------
+
+
+def save_state(
+    state: PortfolioState,
+    output_dir: str = "portfolio_data",
+    portfolio: str = "default",
+) -> Path:
+    """Write PortfolioState to state.json.
+
+    Returns:
+        Path to state.json.
+    """
+    path = _portfolio_dir(output_dir, portfolio) / "state.json"
+    _write_json(path, state.model_dump())
+    return path
+
+
+def load_state(
+    output_dir: str = "portfolio_data",
+    portfolio: str = "default",
+) -> PortfolioState:
+    """Load state.json as PortfolioState.
+
+    Returns:
+        PortfolioState (empty if file does not exist).
+    """
+    file_path = _portfolio_dir(output_dir, portfolio) / "state.json"
+    try:
+        data = json.loads(file_path.read_text())
+        return PortfolioState.model_validate(data)
+    except FileNotFoundError:
+        return PortfolioState()
+    except (json.JSONDecodeError, Exception) as exc:
+        raise ValueError(f"State file '{file_path}' is corrupted or has an unknown format: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# Convenience: save / load current portfolio
+# ---------------------------------------------------------------------------
+
+
+def save_portfolio(
+    picks: list[Pick],
     date: str,
     output_dir: str = "portfolio_data",
+    portfolio: str = "default",
+    *,
+    portfolio_return: float | None = None,
+    spy_return: float | None = None,
+    twr: float | None = None,
 ) -> Path:
-    """Speichert Picks als JSON in output_dir/latest_picks.json."""
-    dir_path = Path(output_dir)
-    dir_path.mkdir(parents=True, exist_ok=True)
-
-    payload: PicksFile = {
-        "date": date,
-        "picks": [
-            {
-                "ticker": p.ticker,
-                "score": p.score,
-                "signal": p.signal,
-                "decision_text": p.decision_text,
-            }
-            for p in picks
-        ],
-    }
-
-    out_file = dir_path / PICKS_FILENAME
-    out_file.write_text(json.dumps(payload, indent=2))
-    return out_file
-
-
-def load_picks(output_dir: str = "portfolio_data") -> PicksFile | None:
-    """Lädt Picks aus output_dir/latest_picks.json.
+    """Save picks as current_portfolio in state.json.
 
     Returns:
-        PicksFile dict oder None wenn nicht vorhanden oder korrupt.
+        Path to state.json.
     """
-    file_path = Path(output_dir) / PICKS_FILENAME
-    try:
-        content = file_path.read_text()
-        data = json.loads(content)
-        # Minimale Schema-Validierung
-        _ = data["date"], data["picks"]
-        return data
-    except FileNotFoundError:
-        return None
-    except (json.JSONDecodeError, KeyError) as exc:
-        raise ValueError(
-            f"Portfolio-Datei '{file_path}' ist beschädigt oder hat ein unbekanntes Format: {exc}"
-        ) from exc
+    portfolio_obj = Portfolio(
+        date=date,
+        picks=picks,
+        portfolio_return=portfolio_return,
+        spy_return=spy_return,
+        twr=twr,
+    )
+    state = load_state(output_dir, portfolio)
+    state = state.model_copy(update={"current_portfolio": portfolio_obj})
+    return save_state(state, output_dir, portfolio)
 
 
-def archive_picks(date: str, output_dir: str = "portfolio_data") -> Path | None:
-    """Archiviert latest_picks.json als history/YYYY-MM-DD.json.
+def load_portfolio(
+    output_dir: str = "portfolio_data",
+    portfolio: str = "default",
+) -> Portfolio | None:
+    """Load current_portfolio from state.json.
 
     Returns:
-        Pfad zur archivierten Datei, oder None wenn keine latest_picks.json vorhanden.
+        Portfolio or None if not found.
     """
-    latest = Path(output_dir) / PICKS_FILENAME
-    try:
-        content = latest.read_text()
-    except FileNotFoundError:
-        return None
+    state = load_state(output_dir, portfolio)
+    return state.current_portfolio
 
-    history_dir = Path(output_dir) / "history"
-    history_dir.mkdir(parents=True, exist_ok=True)
-    archive_file = history_dir / f"{date}.json"
-    archive_file.write_text(content)
-    return archive_file
+
+# ---------------------------------------------------------------------------
+# Rebalance: updates current_portfolio and appends snapshot
+# ---------------------------------------------------------------------------
+
+
+def archive_rebalance(
+    event: RebalanceEvent,
+    new_portfolio: Portfolio,
+    output_dir: str = "portfolio_data",
+    portfolio: str = "default",
+) -> Path:
+    """Persists a rebalance: updates current_portfolio and appends snapshot to state.json.
+
+    Args:
+        event: The rebalance event containing per-pick actions and period return.
+        new_portfolio: The new active portfolio (HOLD + BUY picks only).
+        output_dir: Base directory for portfolio data.
+        portfolio: Portfolio name / subdirectory.
+
+    Returns:
+        Path to the written state.json.
+    """
+    state = load_state(output_dir, portfolio)
+
+    snapshot = new_portfolio.model_copy(
+        update={
+            "portfolio_return": event.period_return,
+        }
+    )
+    updated_state = PortfolioState(
+        current_portfolio=new_portfolio,
+        past_portfolios=state.past_portfolios + [snapshot],
+        rebalance_count=state.rebalance_count + 1,
+    )
+    return save_state(updated_state, output_dir, portfolio)

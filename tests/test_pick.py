@@ -1,39 +1,44 @@
-"""Tests for Ticket 1: pick command — Top-10 Aktien auswählen."""
+"""Tests for Ticket 1: pick command — select top-10 stocks."""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock
+
 import pytest
 
+from tradingagents.portfolio.batch_runner import BatchRunner
+from tradingagents.portfolio.models import Pick
+from tradingagents.portfolio.persistence import load_portfolio, save_portfolio
 from tradingagents.portfolio.scorer import KeywordScorer
-from tradingagents.portfolio.batch_runner import BatchRunner, PickResult
-from tradingagents.portfolio.persistence import save_picks, load_picks, PICKS_FILENAME
-
 
 # ---------------------------------------------------------------------------
 # Scorer tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("signal,expected", [
-    ("BUY", 1.0),
-    ("buy", 1.0),
-    ("  BUY  ", 1.0),
-    ("SELL", -1.0),
-    ("sell", -1.0),
-    ("HOLD", 0.0),
-    ("hold", 0.0),
-    ("UNKNOWN", 0.0),
-    ("", 0.0),
-])
+
+@pytest.mark.parametrize(
+    "signal,expected",
+    [
+        ("BUY", 1.0),
+        ("buy", 1.0),
+        ("  BUY  ", 1.0),
+        ("SELL", -1.0),
+        ("sell", -1.0),
+        ("HOLD", 0.0),
+        ("hold", 0.0),
+        ("UNKNOWN", 0.0),
+        ("", 0.0),
+    ],
+)
 def test_keyword_scorer(signal: str, expected: float):
     assert KeywordScorer().score(signal) == expected
 
 
 @pytest.mark.parametrize("signal", ["BUYBACK", "RESELL"])
 def test_keyword_scorer_no_substring_false_positives(signal: str):
-    """Word-boundary matching verhindert false positives bei Substrings."""
+    """Word-boundary matching prevents false positives on substrings."""
     score = KeywordScorer().score(signal)
-    # "BUYBACK" darf nicht als BUY gewertet werden, "RESELL" nicht als SELL
+    # "BUYBACK" must not count as BUY, "RESELL" must not count as SELL
     assert score == 0.0
 
 
@@ -41,11 +46,13 @@ def test_keyword_scorer_no_substring_false_positives(signal: str):
 # BatchRunner tests
 # ---------------------------------------------------------------------------
 
+
 class TestBatchRunner:
     def _make_propagate_fn(self, signal_map: dict):
         def propagate_fn(ticker: str, date: str):
             signal = signal_map.get(ticker, "HOLD")
             return {"final_trade_decision": f"Decision: {signal}"}, signal
+
         return propagate_fn
 
     def test_run_returns_correct_number_of_results(self):
@@ -53,10 +60,10 @@ class TestBatchRunner:
         results = BatchRunner(propagate_fn=fn).run(["AAPL", "MSFT", "TSLA"], "2024-01-01")
         assert len(results) == 3
 
-    def test_all_results_are_pick_result_instances(self):
+    def test_all_results_are_pick_instances(self):
         fn = self._make_propagate_fn({"AAPL": "BUY"})
         results = BatchRunner(propagate_fn=fn).run(["AAPL"], "2024-01-01")
-        assert all(isinstance(r, PickResult) for r in results)
+        assert all(isinstance(r, Pick) for r in results)
 
     def test_results_sorted_descending_by_score(self):
         fn = self._make_propagate_fn({"AAPL": "BUY", "MSFT": "HOLD", "TSLA": "SELL"})
@@ -131,7 +138,7 @@ class TestBatchRunner:
         def always_fail(ticker: str, date: str):
             raise RuntimeError("always fails")
 
-        with pytest.raises(RuntimeError, match="Analysen fehlgeschlagen"):
+        with pytest.raises(RuntimeError, match="analyses failed"):
             BatchRunner(propagate_fn=always_fail).run(["AAPL", "MSFT"], "2024-01-01")
 
 
@@ -139,44 +146,72 @@ class TestBatchRunner:
 # Persistence tests
 # ---------------------------------------------------------------------------
 
+
 class TestPersistence:
     def test_save_and_load_roundtrip(self, tmp_path):
         picks = [
-            PickResult(ticker="AAPL", score=1.0, signal="BUY", decision_text="Strong buy"),
-            PickResult(ticker="MSFT", score=0.0, signal="HOLD", decision_text="Hold steady"),
+            Pick(ticker="AAPL", score=1.0, signal="BUY", decision_text="Strong buy"),
+            Pick(ticker="MSFT", score=0.0, signal="HOLD", decision_text="Hold steady"),
         ]
-        save_picks(picks, date="2024-01-01", output_dir=str(tmp_path))
-        loaded = load_picks(output_dir=str(tmp_path))
+        save_portfolio(picks, date="2024-01-01", output_dir=str(tmp_path))
+        loaded = load_portfolio(output_dir=str(tmp_path))
         assert loaded is not None
-        assert len(loaded["picks"]) == 2
-        assert loaded["picks"][0]["ticker"] == "AAPL"
-        assert loaded["picks"][0]["score"] == 1.0
+        assert len(loaded.picks) == 2
+        assert loaded.picks[0].ticker == "AAPL"
+        assert loaded.picks[0].score == 1.0
 
-    def test_save_creates_json_file(self, tmp_path):
-        picks = [PickResult(ticker="AAPL", score=1.0, signal="BUY", decision_text="x")]
-        save_picks(picks, date="2024-01-01", output_dir=str(tmp_path))
-        assert (tmp_path / PICKS_FILENAME).exists()
+    def test_save_creates_state_json(self, tmp_path):
+        picks = [Pick(ticker="AAPL", score=1.0, signal="BUY", decision_text="x")]
+        save_portfolio(picks, date="2024-01-01", output_dir=str(tmp_path))
+        assert (tmp_path / "default" / "state.json").exists()
 
     def test_load_returns_none_when_no_file(self, tmp_path):
-        assert load_picks(output_dir=str(tmp_path)) is None
+        assert load_portfolio(output_dir=str(tmp_path)) is None
 
     def test_saved_file_contains_date(self, tmp_path):
-        picks = [PickResult(ticker="AAPL", score=1.0, signal="BUY", decision_text="x")]
-        save_picks(picks, date="2024-01-01", output_dir=str(tmp_path))
-        assert load_picks(output_dir=str(tmp_path))["date"] == "2024-01-01"
+        picks = [Pick(ticker="AAPL", score=1.0, signal="BUY", decision_text="x")]
+        save_portfolio(picks, date="2024-01-01", output_dir=str(tmp_path))
+        assert load_portfolio(output_dir=str(tmp_path)).date == "2024-01-01"
 
     def test_all_fields_preserved(self, tmp_path):
-        picks = [PickResult(ticker="NVDA", score=-1.0, signal="SELL", decision_text="Bearish outlook")]
-        save_picks(picks, date="2024-06-15", output_dir=str(tmp_path))
-        loaded = load_picks(output_dir=str(tmp_path))["picks"][0]
-        assert loaded["ticker"] == "NVDA"
-        assert loaded["score"] == -1.0
-        assert loaded["signal"] == "SELL"
-        assert loaded["decision_text"] == "Bearish outlook"
+        picks = [Pick(ticker="NVDA", score=-1.0, signal="SELL", decision_text="Bearish outlook")]
+        save_portfolio(picks, date="2024-06-15", output_dir=str(tmp_path))
+        loaded = load_portfolio(output_dir=str(tmp_path)).picks[0]
+        assert loaded.ticker == "NVDA"
+        assert loaded.score == -1.0
+        assert loaded.signal == "SELL"
+        assert loaded.decision_text == "Bearish outlook"
+
+    def test_save_does_not_create_extra_files(self, tmp_path):
+        picks = [Pick(ticker="AAPL", score=1.0, signal="BUY", decision_text="x")]
+        save_portfolio(picks, date="2024-01-01", output_dir=str(tmp_path))
+        files = list((tmp_path / "default").iterdir())
+        assert len(files) == 1
+        assert files[0].name == "state.json"
 
     def test_save_overwrites_previous_file(self, tmp_path):
-        save_picks([PickResult("AAPL", 1.0, "BUY", "x")], date="2024-01-01", output_dir=str(tmp_path))
-        save_picks([PickResult("MSFT", 0.0, "HOLD", "y")], date="2024-01-08", output_dir=str(tmp_path))
-        loaded = load_picks(output_dir=str(tmp_path))
-        assert len(loaded["picks"]) == 1
-        assert loaded["picks"][0]["ticker"] == "MSFT"
+        save_portfolio(
+            [Pick(ticker="AAPL", score=1.0, signal="BUY", decision_text="x")],
+            date="2024-01-01",
+            output_dir=str(tmp_path),
+        )
+        save_portfolio(
+            [Pick(ticker="MSFT", score=0.0, signal="HOLD", decision_text="y")],
+            date="2024-01-08",
+            output_dir=str(tmp_path),
+        )
+        loaded = load_portfolio(output_dir=str(tmp_path))
+        assert len(loaded.picks) == 1
+        assert loaded.picks[0].ticker == "MSFT"
+
+    def test_entry_price_stored_and_loaded(self, tmp_path):
+        picks = [Pick(ticker="AAPL", score=1.0, signal="BUY", decision_text="x", entry_price=213.49)]
+        save_portfolio(picks, date="2024-01-01", output_dir=str(tmp_path))
+        loaded = load_portfolio(output_dir=str(tmp_path)).picks[0]
+        assert loaded.entry_price == 213.49
+
+    def test_entry_price_none_when_not_provided(self, tmp_path):
+        picks = [Pick(ticker="AAPL", score=1.0, signal="BUY", decision_text="x")]
+        save_portfolio(picks, date="2024-01-01", output_dir=str(tmp_path))
+        loaded = load_portfolio(output_dir=str(tmp_path)).picks[0]
+        assert loaded.entry_price is None

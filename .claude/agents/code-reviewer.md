@@ -156,6 +156,13 @@ const usersWithPosts = await db.query(`
 `);
 ```
 
+### Conciseness (HIGH)
+
+- **Verbose implementations** — Explore whether the same functionality can be achieved with substantially fewer lines of code
+- **Classes where functions suffice** — If a class only wraps a single method or holds no mutable state, prefer a plain function
+- **Multi-step logic that can be a single expression** — Combine guard clauses, conditionals, or loops into simpler forms when readability is preserved
+- If a shorter alternative achieves the same result with equal clarity, flag the verbose version for simplification
+
 ### Performance (MEDIUM)
 
 - **Inefficient algorithms** — O(n^2) when O(n log n) or O(n) is possible

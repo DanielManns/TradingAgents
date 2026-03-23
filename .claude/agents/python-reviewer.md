@@ -44,6 +44,8 @@ When invoked:
 - Deep nesting (> 4 levels)
 - Duplicate code patterns
 - Magic numbers without named constants
+- **Verbose implementations** — explore whether the same functionality can be realized with substantially fewer lines; if a shorter alternative achieves the same result with equal readability, prefer it
+- **Unnecessary classes** — if a class only wraps a single method or holds no mutable state, flag it and suggest a plain function instead
 
 ### HIGH — Concurrency
 - Shared state without locks — use `threading.Lock`

@@ -37,11 +37,36 @@ tradingagents = "cli.main:app"
 dev = [
     "pytest>=8.0",
     "pytest-mock>=3.14",
+    "pre-commit>=4.0",
+    "ruff>=0.9.10",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+
+[tool.ruff.lint.per-file-ignores]
+"cli/main.py" = ["E402", "F403", "F405"]
+"cli/utils.py" = ["F821"]
+"tests/*" = ["E501", "B017"]
+"tradingagents/agents/*" = ["E501", "F403", "F405", "B007"]
+"tradingagents/agents/utils/agent_states.py" = ["F403"]
+"tradingagents/graph/*" = ["E501", "F403", "F405"]
+"tradingagents/dataflows/*" = ["E501", "B904"]
 
 [tool.setuptools.packages.find]
 include = ["tradingagents*", "cli*"]

@@ -1,5 +1,5 @@
 import os
-from typing import Any, Optional
+from typing import Any
 
 from langchain_openai import ChatOpenAI
 
@@ -21,11 +21,7 @@ class UnifiedChatOpenAI(ChatOpenAI):
     def _is_reasoning_model(model: str) -> bool:
         """Check if model is a reasoning model that doesn't support temperature."""
         model_lower = model.lower()
-        return (
-            model_lower.startswith("o1")
-            or model_lower.startswith("o3")
-            or "gpt-5" in model_lower
-        )
+        return model_lower.startswith("o1") or model_lower.startswith("o3") or "gpt-5" in model_lower
 
 
 class OpenAIClient(BaseLLMClient):
@@ -34,7 +30,7 @@ class OpenAIClient(BaseLLMClient):
     def __init__(
         self,
         model: str,
-        base_url: Optional[str] = None,
+        base_url: str | None = None,
         provider: str = "openai",
         **kwargs,
     ):

@@ -159,6 +159,8 @@ T1 (pick) ──→ T2 (rebalance) ──→ T3 (status)
 T1 (pick) ──→ T4 (caching) ←─────────┘
 
 T1 (pick) ──→ T5 (besseres scoring)
+
+T6 (lint-cleanup) ── unabhangig, jederzeit machbar
 ```
 
 - **T1 + T2** liefern die komplette User-Story (Kern-MVP)
@@ -197,6 +199,35 @@ T1 (pick) ──→ T5 (besseres scoring)
 | 3 | Not started | `feature/portfolio-status` | T1 | Quality-of-Life |
 | 4 | Not started | `feature/analysis-caching` | T1 | Kostenoptimierung |
 | 5 | Not started | `feature/conviction-scoring` | T1 | Qualitatsverbesserung |
+| 6 | Not started | `feature/lint-cleanup` | — | Ruff per-file-ignores auflosen |
+
+---
+
+### Ticket 6: Lint-Cleanup — Ruff-Ignores in bestehendem Code auflosen
+**Branch:** `feature/lint-cleanup`
+**Frage:** *"Wir haben pre-commit mit ruff eingefuhrt, aber mussten viele bestehende Violations per-file ignorieren. Was brauche ich, damit der gesamte Code sauber ist?"*
+**Antwort:** Die per-file-ignores in `pyproject.toml` Schritt fur Schritt auflosen.
+
+- **`cli/main.py`** — `E402` (imports nach `load_dotenv()`), `F403`/`F405` (star import aus `cli.utils`): Star-Import durch explizite Imports ersetzen. `load_dotenv()` in ein fruhes Bootstrap-Modul verschieben oder `E402`-Ignore belassen (bewusste Design-Entscheidung)
+- **`cli/utils.py`** — `F821` (undefined `console`): Fehlende `console = Console()` Instanz hinzufugen oder als Parameter durchreichen
+- **`tests/*`** — `E501` (lange Zeilen), `B017` (blind `pytest.raises(Exception)`): Lange Zeilen umbrechen, spezifische Exception-Typen in `pytest.raises` verwenden
+- **`tradingagents/agents/*`** — `E501` (lange Prompt-Strings), `F403`/`F405` (star imports), `B007` (unused loop vars): Prompts in Multiline-Strings oder Konstanten extrahieren, star imports durch explizite Imports ersetzen, unused loop vars mit `_` prefixen
+- **`tradingagents/agents/utils/agent_states.py`** — `F403` (star import): Explizite Imports verwenden
+- **`tradingagents/graph/*`** — `E501` (lange Strings), `F403`/`F405` (star imports): Star imports auflosen, lange Strings umbrechen
+- **`tradingagents/dataflows/*`** — `E501` (lange Zeilen), `B904` (missing `raise ... from`): Zeilen umbrechen, Exception-Chaining mit `from err` hinzufugen
+- **`tests/test_analysis_horizon.py`** — `ImportError` (broken import `get_balance_sheet` aus `agent_utils`): Import fixen oder Test an aktuelle API anpassen. Aktuell per `--ignore` aus pre-commit pytest-Hook ausgeschlossen
+
+**Dateien:**
+- Modify: `cli/main.py`, `cli/utils.py`
+- Modify: `tests/test_rebalance.py`, `tests/test_analysis_horizon.py`
+- Modify: `tradingagents/agents/**/*.py` (Analysts, Managers, Researchers, Trader)
+- Modify: `tradingagents/agents/utils/agent_states.py`
+- Modify: `tradingagents/graph/setup.py`, `tradingagents/graph/signal_processing.py`
+- Modify: `tradingagents/dataflows/alpha_vantage_common.py`, `tradingagents/dataflows/alpha_vantage_indicator.py`
+- Modify: `pyproject.toml` — per-file-ignores entfernen
+- Modify: `.pre-commit-config.yaml` — `--ignore=tests/test_analysis_horizon.py` aus pytest-Hook entfernen
+
+**AC:** Alle `[tool.ruff.lint.per-file-ignores]` Eintrage aus `pyproject.toml` entfernt. `--ignore` aus `.pre-commit-config.yaml` pytest-Hook entfernt. `ruff check .` und `pre-commit run --all-files` bestehen ohne Ignores. Kein Verhaltensanderung im Code.
 
 ---
 
