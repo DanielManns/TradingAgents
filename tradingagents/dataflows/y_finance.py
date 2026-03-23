@@ -120,9 +120,12 @@ def get_stock_stats_indicators_window(
             "Tips: Watch for skewed results from volume spikes; use in combination with other volume analyses."
         ),
         "mfi": (
-            "MFI: The Money Flow Index is a momentum indicator that uses both price and volume to measure buying and selling pressure. "
-            "Usage: Identify overbought (>80) or oversold (<20) conditions and confirm the strength of trends or reversals. "
-            "Tips: Use alongside RSI or MACD to confirm signals; divergence between price and MFI can indicate potential reversals."
+            "MFI: The Money Flow Index is a momentum indicator that uses both price"
+            " and volume to measure buying and selling pressure. "
+            "Usage: Identify overbought (>80) or oversold (<20) conditions"
+            " and confirm the strength of trends or reversals. "
+            "Tips: Use alongside RSI or MACD to confirm signals;"
+            " divergence between price and MFI can indicate potential reversals."
         ),
     }
 
@@ -206,8 +209,8 @@ def _get_stock_stats_bulk(
                 )
             )
             df = wrap(data)
-        except FileNotFoundError:
-            raise Exception("Stockstats fail: Yahoo Finance data not fetched yet!")
+        except FileNotFoundError as err:
+            raise Exception("Stockstats fail: Yahoo Finance data not fetched yet!") from err
     else:
         # Online data fetching with caching
         today_date = pd.Timestamp.today()

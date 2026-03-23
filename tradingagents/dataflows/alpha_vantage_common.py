@@ -31,8 +31,8 @@ def format_datetime_for_api(date_input) -> str:
             try:
                 dt = datetime.strptime(date_input, "%Y-%m-%d %H:%M")
                 return dt.strftime("%Y%m%dT%H%M")
-            except ValueError:
-                raise ValueError(f"Unsupported date format: {date_input}")
+            except ValueError as err:
+                raise ValueError(f"Unsupported date format: {date_input}") from err
     elif isinstance(date_input, datetime):
         return date_input.strftime("%Y%m%dT%H%M")
     else:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from tradingagents.portfolio.models import (
     MAX_PICKS,
@@ -209,7 +210,7 @@ class TestPortfolioValidation:
 
     def test_portfolio_rejects_over_max_picks(self):
         picks = [_make_pick(f"T{i:03d}", 1.0) for i in range(MAX_PICKS + 1)]
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             Portfolio(date="2024-01-01", picks=picks)
 
     def test_portfolio_accepts_fewer_than_max(self):

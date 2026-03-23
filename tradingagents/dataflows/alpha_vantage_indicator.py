@@ -45,18 +45,74 @@ def get_indicator(
     }
 
     indicator_descriptions = {
-        "close_50_sma": "50 SMA: A medium-term trend indicator. Usage: Identify trend direction and serve as dynamic support/resistance. Tips: It lags price; combine with faster indicators for timely signals.",
-        "close_200_sma": "200 SMA: A long-term trend benchmark. Usage: Confirm overall market trend and identify golden/death cross setups. Tips: It reacts slowly; best for strategic trend confirmation rather than frequent trading entries.",
-        "close_10_ema": "10 EMA: A responsive short-term average. Usage: Capture quick shifts in momentum and potential entry points. Tips: Prone to noise in choppy markets; use alongside longer averages for filtering false signals.",
-        "macd": "MACD: Computes momentum via differences of EMAs. Usage: Look for crossovers and divergence as signals of trend changes. Tips: Confirm with other indicators in low-volatility or sideways markets.",
-        "macds": "MACD Signal: An EMA smoothing of the MACD line. Usage: Use crossovers with the MACD line to trigger trades. Tips: Should be part of a broader strategy to avoid false positives.",
-        "macdh": "MACD Histogram: Shows the gap between the MACD line and its signal. Usage: Visualize momentum strength and spot divergence early. Tips: Can be volatile; complement with additional filters in fast-moving markets.",
-        "rsi": "RSI: Measures momentum to flag overbought/oversold conditions. Usage: Apply 70/30 thresholds and watch for divergence to signal reversals. Tips: In strong trends, RSI may remain extreme; always cross-check with trend analysis.",
-        "boll": "Bollinger Middle: A 20 SMA serving as the basis for Bollinger Bands. Usage: Acts as a dynamic benchmark for price movement. Tips: Combine with the upper and lower bands to effectively spot breakouts or reversals.",
-        "boll_ub": "Bollinger Upper Band: Typically 2 standard deviations above the middle line. Usage: Signals potential overbought conditions and breakout zones. Tips: Confirm signals with other tools; prices may ride the band in strong trends.",
-        "boll_lb": "Bollinger Lower Band: Typically 2 standard deviations below the middle line. Usage: Indicates potential oversold conditions. Tips: Use additional analysis to avoid false reversal signals.",
-        "atr": "ATR: Averages true range to measure volatility. Usage: Set stop-loss levels and adjust position sizes based on current market volatility. Tips: It's a reactive measure, so use it as part of a broader risk management strategy.",
-        "vwma": "VWMA: A moving average weighted by volume. Usage: Confirm trends by integrating price action with volume data. Tips: Watch for skewed results from volume spikes; use in combination with other volume analyses.",
+        "close_50_sma": (
+            "50 SMA: A medium-term trend indicator."
+            " Usage: Identify trend direction and serve as dynamic support/resistance."
+            " Tips: It lags price; combine with faster indicators for timely signals."
+        ),
+        "close_200_sma": (
+            "200 SMA: A long-term trend benchmark."
+            " Usage: Confirm overall market trend and identify golden/death cross setups."
+            " Tips: It reacts slowly; best for strategic trend confirmation"
+            " rather than frequent trading entries."
+        ),
+        "close_10_ema": (
+            "10 EMA: A responsive short-term average."
+            " Usage: Capture quick shifts in momentum and potential entry points."
+            " Tips: Prone to noise in choppy markets;"
+            " use alongside longer averages for filtering false signals."
+        ),
+        "macd": (
+            "MACD: Computes momentum via differences of EMAs."
+            " Usage: Look for crossovers and divergence as signals of trend changes."
+            " Tips: Confirm with other indicators in low-volatility or sideways markets."
+        ),
+        "macds": (
+            "MACD Signal: An EMA smoothing of the MACD line."
+            " Usage: Use crossovers with the MACD line to trigger trades."
+            " Tips: Should be part of a broader strategy to avoid false positives."
+        ),
+        "macdh": (
+            "MACD Histogram: Shows the gap between the MACD line and its signal."
+            " Usage: Visualize momentum strength and spot divergence early."
+            " Tips: Can be volatile; complement with additional filters in fast-moving markets."
+        ),
+        "rsi": (
+            "RSI: Measures momentum to flag overbought/oversold conditions."
+            " Usage: Apply 70/30 thresholds and watch for divergence to signal reversals."
+            " Tips: In strong trends, RSI may remain extreme;"
+            " always cross-check with trend analysis."
+        ),
+        "boll": (
+            "Bollinger Middle: A 20 SMA serving as the basis for Bollinger Bands."
+            " Usage: Acts as a dynamic benchmark for price movement."
+            " Tips: Combine with the upper and lower bands"
+            " to effectively spot breakouts or reversals."
+        ),
+        "boll_ub": (
+            "Bollinger Upper Band: Typically 2 standard deviations above the middle line."
+            " Usage: Signals potential overbought conditions and breakout zones."
+            " Tips: Confirm signals with other tools;"
+            " prices may ride the band in strong trends."
+        ),
+        "boll_lb": (
+            "Bollinger Lower Band: Typically 2 standard deviations below the middle line."
+            " Usage: Indicates potential oversold conditions."
+            " Tips: Use additional analysis to avoid false reversal signals."
+        ),
+        "atr": (
+            "ATR: Averages true range to measure volatility."
+            " Usage: Set stop-loss levels and adjust position sizes"
+            " based on current market volatility."
+            " Tips: It's a reactive measure, so use it as part of"
+            " a broader risk management strategy."
+        ),
+        "vwma": (
+            "VWMA: A moving average weighted by volume."
+            " Usage: Confirm trends by integrating price action with volume data."
+            " Tips: Watch for skewed results from volume spikes;"
+            " use in combination with other volume analyses."
+        ),
     }
 
     if indicator not in supported_indicators:
@@ -150,7 +206,14 @@ def get_indicator(
         elif indicator == "vwma":
             # Alpha Vantage doesn't have direct VWMA, so we'll return an informative message
             # In a real implementation, this would need to be calculated from OHLCV data
-            return f"## VWMA (Volume Weighted Moving Average) for {symbol}:\n\nVWMA calculation requires OHLCV data and is not directly available from Alpha Vantage API.\nThis indicator would need to be calculated from the raw stock data using volume-weighted price averaging.\n\n{indicator_descriptions.get('vwma', 'No description available.')}"
+            vwma_desc = indicator_descriptions.get("vwma", "No description available.")
+            return (
+                f"## VWMA (Volume Weighted Moving Average) for {symbol}:\n\n"
+                "VWMA calculation requires OHLCV data and is not directly available"
+                " from Alpha Vantage API.\n"
+                "This indicator would need to be calculated from the raw stock data"
+                f" using volume-weighted price averaging.\n\n{vwma_desc}"
+            )
         else:
             return f"Error: Indicator {indicator} not implemented yet."
 
@@ -190,7 +253,10 @@ def get_indicator(
             try:
                 value_col_idx = header.index(target_col_name)
             except ValueError:
-                return f"Error: Column '{target_col_name}' not found for indicator '{indicator}'. Available columns: {header}"
+                return (
+                    f"Error: Column '{target_col_name}' not found for indicator"
+                    f" '{indicator}'. Available columns: {header}"
+                )
 
         result_data = []
         for line in lines[1:]:

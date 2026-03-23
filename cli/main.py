@@ -1,21 +1,17 @@
 import datetime
-from functools import wraps
-from pathlib import Path
-
-import typer
-from dotenv import load_dotenv
-from rich.console import Console
-
-# Load environment variables from .env file
-load_dotenv()
 import random
 import time
 from collections import deque
+from functools import wraps
+from pathlib import Path
 
 import pandas as pd
+import typer
 import yfinance as yf
+from dotenv import load_dotenv
 from rich import box
 from rich.align import Align
+from rich.console import Console
 from rich.layout import Layout
 from rich.live import Live
 from rich.markdown import Markdown
@@ -27,7 +23,17 @@ from rich.text import Text
 
 from cli.announcements import display_announcements, fetch_announcements
 from cli.stats_handler import StatsCallbackHandler
-from cli.utils import *
+from cli.utils import (
+    ask_gemini_thinking_config,
+    ask_openai_reasoning_effort,
+    get_analysis_date,
+    get_ticker,
+    select_analysts,
+    select_deep_thinking_agent,
+    select_llm_provider,
+    select_research_depth,
+    select_shallow_thinking_agent,
+)
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.portfolio.batch_runner import BatchRunner
@@ -37,10 +43,23 @@ from tradingagents.portfolio.evaluate import (
     evaluate_portfolio_state,
     live_period_return,
 )
-from tradingagents.portfolio.models import MAX_PICKS, Pick, Portfolio, RebalanceAction, RebalanceEvent
-from tradingagents.portfolio.persistence import archive_rebalance, load_portfolio, load_state, save_portfolio
+from tradingagents.portfolio.models import (
+    MAX_PICKS,
+    Pick,
+    Portfolio,
+    RebalanceAction,
+    RebalanceEvent,
+)
+from tradingagents.portfolio.persistence import (
+    archive_rebalance,
+    load_portfolio,
+    load_state,
+    save_portfolio,
+)
 from tradingagents.portfolio.rebalancer import Rebalancer
 from tradingagents.portfolio.universe import UNIVERSE
+
+load_dotenv()
 
 SIGNAL_STYLES: dict[str, str] = {"BUY": "green", "SELL": "red", "HOLD": "yellow"}
 ACTION_STYLES: dict[RebalanceAction, str] = {
@@ -550,26 +569,6 @@ def get_user_selections():
         "google_thinking_level": thinking_level,
         "openai_reasoning_effort": reasoning_effort,
     }
-
-
-def get_ticker():
-    """Get ticker symbol from user input."""
-    return typer.prompt("", default="SPY")
-
-
-def get_analysis_date():
-    """Get the analysis date from user input."""
-    while True:
-        date_str = typer.prompt("", default=datetime.datetime.now().strftime("%Y-%m-%d"))
-        try:
-            # Validate date format and ensure it's not in the future
-            analysis_date = datetime.datetime.strptime(date_str, "%Y-%m-%d")
-            if analysis_date.date() > datetime.datetime.now().date():
-                console.print("[red]Error: Analysis date cannot be in the future[/red]")
-                continue
-            return date_str
-        except ValueError:
-            console.print("[red]Error: Invalid date format. Please use YYYY-MM-DD[/red]")
 
 
 def save_report_to_disk(final_state, ticker: str, save_path: Path):

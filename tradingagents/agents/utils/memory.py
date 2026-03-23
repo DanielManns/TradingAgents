@@ -112,7 +112,8 @@ if __name__ == "__main__":
         ),
         (
             "Tech sector showing high volatility with increasing institutional selling pressure",
-            "Reduce exposure to high-growth tech stocks. Look for value opportunities in established tech companies with strong cash flows.",
+            "Reduce exposure to high-growth tech stocks."
+            " Look for value opportunities in established tech companies with strong cash flows.",
         ),
         (
             "Strong dollar affecting emerging markets with increasing forex volatility",
@@ -120,7 +121,8 @@ if __name__ == "__main__":
         ),
         (
             "Market showing signs of sector rotation with rising yields",
-            "Rebalance portfolio to maintain target allocations. Consider increasing exposure to sectors benefiting from higher rates.",
+            "Rebalance portfolio to maintain target allocations."
+            " Consider increasing exposure to sectors benefiting from higher rates.",
         ),
     ]
 
