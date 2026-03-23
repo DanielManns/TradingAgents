@@ -29,6 +29,8 @@ class Pick(BaseModel):
     entry_price: float | None = None
     current_price: float | None = None
     pct_change: float | None = None
+    last_action: str | None = None
+    last_signal: str | None = None
     exit_date: str | None = None
     exit_price: float | None = None
 
