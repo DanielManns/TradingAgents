@@ -36,7 +36,7 @@ from cli.utils import (
 )
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
-from tradingagents.portfolio.batch_runner import BatchRunner
+from tradingagents.portfolio.batch_runner import run_batch
 from tradingagents.portfolio.evaluate import (
     evaluate_picks,
     evaluate_portfolio,
@@ -54,6 +54,7 @@ from tradingagents.portfolio.persistence import (
     archive_rebalance,
     load_portfolio,
     load_state,
+    save_batch_signals,
     save_portfolio,
 )
 from tradingagents.portfolio.rebalancer import Rebalancer
@@ -1255,7 +1256,13 @@ def pick(
     console.print(f"\n[bold cyan]TradingAgents Pick[/bold cyan] — Datum: [yellow]{analysis_date}[/yellow]")
     console.print(f"Analysiere {len(UNIVERSE)} Aktien, wähle Top {top_n} aus...\n")
 
-    results = BatchRunner(propagate_fn=_make_propagate_fn(dry_run), delay_seconds=delay).run(UNIVERSE, analysis_date)
+    analysis_date_obj = datetime.date.fromisoformat(analysis_date)
+    results = run_batch(
+        tickers=UNIVERSE,
+        dates=[analysis_date_obj],
+        propagate_fn=_make_propagate_fn(dry_run),
+        delay_seconds=delay,
+    )[analysis_date_obj]
     top_picks = [
         r.model_copy(
             update={
@@ -1364,7 +1371,13 @@ def rebalance(
     console.print(f"Vorheriges Portfolio vom [yellow]{old_date}[/yellow]: {', '.join(held_tickers)}")
     console.print(f"Analysiere {len(all_tickers)} Ticker...\n")
 
-    results = BatchRunner(propagate_fn=_make_propagate_fn(dry_run), delay_seconds=delay).run(all_tickers, analysis_date)
+    analysis_date_obj = datetime.date.fromisoformat(analysis_date)
+    results = run_batch(
+        tickers=all_tickers,
+        dates=[analysis_date_obj],
+        propagate_fn=_make_propagate_fn(dry_run),
+        delay_seconds=delay,
+    )[analysis_date_obj]
 
     new_scores = {r.ticker: r.score for r in results}
     new_decision_texts = {r.ticker: r.decision_text for r in results}
@@ -1442,6 +1455,48 @@ def rebalance(
     new_portfolio = Portfolio(date=analysis_date, picks=new_picks)
     state_path = archive_rebalance(event, new_portfolio=new_portfolio, portfolio=portfolio)
     console.print(f"\n[green]✓ Portfolio-State gespeichert:[/green] {state_path}")
+
+
+@app.command()
+def analyze_batch(
+    tickers: list[str] = typer.Option(None, "--ticker", "-t", help="Ticker(s) to analyse (overrides default_config)."),  # noqa: B008
+    dates: list[str] = typer.Option(  # noqa: B008
+        None, "--date", "-d", help="Date(s) YYYY-MM-DD to analyse (overrides default_config)."
+    ),
+    delay: float = typer.Option(1.0, "--delay", help="Seconds to pause between analyses."),  # noqa: B008
+    dry_run: bool = typer.Option(False, "--dry-run", help="Mock signals, no LLM calls."),  # noqa: B008
+    portfolio: str = typer.Option("default", "--portfolio", "-p", help="Portfolio name (subdirectory)."),  # noqa: B008
+):
+    """Run batch analysis for tickers x dates and save signals to JSONL."""
+    ticker_list: list[str] = tickers or DEFAULT_CONFIG["batch_tickers"]
+    date_strs: list[str] = dates or DEFAULT_CONFIG["batch_dates"]
+
+    try:
+        date_list = [datetime.date.fromisoformat(d) for d in date_strs]
+    except (ValueError, TypeError) as err:
+        raise typer.BadParameter(f"Invalid date: {err}") from err
+
+    if not ticker_list or not date_list:
+        raise typer.BadParameter("Tickers and dates must be non-empty.")
+
+    if dry_run:
+        delay = 0.0
+
+    console.print("\n[bold cyan]TradingAgents Batch Signals[/bold cyan]")
+    console.print(f"Tickers: {', '.join(ticker_list)}")
+    console.print(f"Dates:   {', '.join(d.isoformat() for d in date_list)}")
+    console.print(f"Total:   {len(ticker_list) * len(date_list)} analyses\n")
+
+    results = run_batch(
+        tickers=ticker_list,
+        dates=date_list,
+        propagate_fn=_make_propagate_fn(dry_run),
+        delay_seconds=delay,
+    )
+
+    path = save_batch_signals(results, portfolio=portfolio)
+    total_signals = sum(len(picks) for picks in results.values())
+    console.print(f"\n[green]✓ {total_signals} signals saved to:[/green] {path}")
 
 
 if __name__ == "__main__":

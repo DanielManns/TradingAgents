@@ -3,6 +3,9 @@ import os
 DEFAULT_CONFIG = {
     "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
     "results_dir": os.getenv("TRADINGAGENTS_RESULTS_DIR", "./results"),
+    # Batch analysis settings
+    "batch_tickers": ["AAPL"],
+    "batch_dates": ["2026-02-14", "2026-03-14"],
     "data_cache_dir": os.path.join(
         os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
         "dataflows/data_cache",

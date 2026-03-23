@@ -2,12 +2,14 @@
 
 Each portfolio lives in its own subdirectory under output_dir:
     <output_dir>/<portfolio>/
-        state.json   -- unified portfolio state (current + history)
+        state.json    -- unified portfolio state (current + history)
+        signals.jsonl -- append-only log of batch-run signals
 """
 
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 
 from tradingagents.portfolio.models import Pick, Portfolio, PortfolioState, RebalanceEvent
@@ -141,3 +143,71 @@ def archive_rebalance(
         rebalance_count=state.rebalance_count + 1,
     )
     return save_state(updated_state, output_dir, portfolio)
+
+
+# ---------------------------------------------------------------------------
+# Batch signals (signals.jsonl)
+# ---------------------------------------------------------------------------
+
+_SIGNALS_FILE = "signals.jsonl"
+
+
+def save_batch_signals(
+    results: dict[date, list[Pick]],
+    output_dir: str = "portfolio_data",
+    portfolio: str = "default",
+) -> Path:
+    """Append batch-run signals to a JSONL file (one JSON object per line).
+
+    Each line contains: ticker, date (ISO), signal, score, decision_text.
+    Existing entries for the same (ticker, date) pair are replaced.
+
+    Returns:
+        Path to the signals.jsonl file.
+    """
+    path = _portfolio_dir(output_dir, portfolio) / _SIGNALS_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    existing: dict[tuple[str, str], dict] = {}
+    if path.exists():
+        for line in path.read_text().splitlines():
+            if line.strip():
+                row = json.loads(line)
+                existing[(row["ticker"], row["date"])] = row
+
+    for d, picks in results.items():
+        date_str = d.isoformat()
+        for pick in picks:
+            existing[(pick.ticker, date_str)] = {
+                "ticker": pick.ticker,
+                "date": date_str,
+                "signal": pick.signal,
+                "score": pick.score,
+                "decision_text": pick.decision_text,
+            }
+
+    path.write_text("\n".join(json.dumps(row) for row in existing.values()) + "\n")
+    return path
+
+
+def load_batch_signals(
+    output_dir: str = "portfolio_data",
+    portfolio: str = "default",
+) -> list[dict]:
+    """Load all saved signals from signals.jsonl.
+
+    Returns:
+        List of dicts with keys: ticker, date, signal, score, decision_text.
+
+    Raises:
+        FileNotFoundError: If no signals have been saved yet.
+    """
+    path = _portfolio_dir(output_dir, portfolio) / _SIGNALS_FILE
+    if not path.exists():
+        raise FileNotFoundError(f"No signals file found at {path}")
+
+    rows: list[dict] = []
+    for line in path.read_text().splitlines():
+        if line.strip():
+            rows.append(json.loads(line))
+    return rows

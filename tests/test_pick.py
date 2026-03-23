@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import datetime
 from unittest.mock import MagicMock
 
 import pytest
 
-from tradingagents.portfolio.batch_runner import BatchRunner
+from tradingagents.portfolio.batch_runner import run_batch
 from tradingagents.portfolio.models import Pick
 from tradingagents.portfolio.persistence import load_portfolio, save_portfolio
 from tradingagents.portfolio.scorer import KeywordScorer
@@ -43,37 +44,40 @@ def test_keyword_scorer_no_substring_false_positives(signal: str):
 
 
 # ---------------------------------------------------------------------------
-# BatchRunner tests
+# run_batch tests
 # ---------------------------------------------------------------------------
 
+DATE = datetime.date(2024, 1, 1)
 
-class TestBatchRunner:
-    def _make_propagate_fn(self, signal_map: dict):
-        def propagate_fn(ticker: str, date: str):
-            signal = signal_map.get(ticker, "HOLD")
-            return {"final_trade_decision": f"Decision: {signal}"}, signal
 
-        return propagate_fn
+def _make_propagate_fn(signal_map: dict):
+    def propagate_fn(ticker: str, date: str):
+        signal = signal_map.get(ticker, "HOLD")
+        return {"final_trade_decision": f"Decision: {signal}"}, signal
 
+    return propagate_fn
+
+
+class TestRunBatch:
     def test_run_returns_correct_number_of_results(self):
-        fn = self._make_propagate_fn({"AAPL": "BUY", "MSFT": "HOLD", "TSLA": "SELL"})
-        results = BatchRunner(propagate_fn=fn).run(["AAPL", "MSFT", "TSLA"], "2024-01-01")
+        fn = _make_propagate_fn({"AAPL": "BUY", "MSFT": "HOLD", "TSLA": "SELL"})
+        results = run_batch(tickers=["AAPL", "MSFT", "TSLA"], dates=[DATE], propagate_fn=fn)[DATE]
         assert len(results) == 3
 
     def test_all_results_are_pick_instances(self):
-        fn = self._make_propagate_fn({"AAPL": "BUY"})
-        results = BatchRunner(propagate_fn=fn).run(["AAPL"], "2024-01-01")
+        fn = _make_propagate_fn({"AAPL": "BUY"})
+        results = run_batch(tickers=["AAPL"], dates=[DATE], propagate_fn=fn)[DATE]
         assert all(isinstance(r, Pick) for r in results)
 
     def test_results_sorted_descending_by_score(self):
-        fn = self._make_propagate_fn({"AAPL": "BUY", "MSFT": "HOLD", "TSLA": "SELL"})
-        results = BatchRunner(propagate_fn=fn).run(["TSLA", "MSFT", "AAPL"], "2024-01-01")
+        fn = _make_propagate_fn({"AAPL": "BUY", "MSFT": "HOLD", "TSLA": "SELL"})
+        results = run_batch(tickers=["TSLA", "MSFT", "AAPL"], dates=[DATE], propagate_fn=fn)[DATE]
         scores = [r.score for r in results]
         assert scores == sorted(scores, reverse=True)
 
     def test_tiebreak_is_alphabetical(self):
-        fn = self._make_propagate_fn({"GOOG": "BUY", "AAPL": "BUY", "MSFT": "BUY"})
-        results = BatchRunner(propagate_fn=fn).run(["GOOG", "MSFT", "AAPL"], "2024-01-01")
+        fn = _make_propagate_fn({"GOOG": "BUY", "AAPL": "BUY", "MSFT": "BUY"})
+        results = run_batch(tickers=["GOOG", "MSFT", "AAPL"], dates=[DATE], propagate_fn=fn)[DATE]
         tickers = [r.ticker for r in results]
         assert tickers == sorted(tickers)
 
@@ -83,7 +87,7 @@ class TestBatchRunner:
                 raise RuntimeError("Simulated failure")
             return {"final_trade_decision": "BUY"}, "BUY"
 
-        results = BatchRunner(propagate_fn=failing_fn).run(["AAPL", "BAD", "MSFT"], "2024-01-01")
+        results = run_batch(tickers=["AAPL", "BAD", "MSFT"], dates=[DATE], propagate_fn=failing_fn)[DATE]
         tickers = [r.ticker for r in results]
         assert "BAD" not in tickers
         assert "AAPL" in tickers
@@ -98,12 +102,14 @@ class TestBatchRunner:
                 raise RuntimeError("fail")
             return {"final_trade_decision": "BUY"}, "BUY"
 
-        BatchRunner(propagate_fn=tracking_fn).run(["AAPL", "BAD", "MSFT"], "2024-01-01")
+        run_batch(tickers=["AAPL", "BAD", "MSFT"], dates=[DATE], propagate_fn=tracking_fn)
         assert calls == ["AAPL", "BAD", "MSFT"]
 
     def test_score_is_derived_from_signal(self):
-        fn = self._make_propagate_fn({"AAPL": "BUY", "MSFT": "SELL", "GOOG": "HOLD"})
-        results = {r.ticker: r for r in BatchRunner(propagate_fn=fn).run(["AAPL", "MSFT", "GOOG"], "2024-01-01")}
+        fn = _make_propagate_fn({"AAPL": "BUY", "MSFT": "SELL", "GOOG": "HOLD"})
+        results = {
+            r.ticker: r for r in run_batch(tickers=["AAPL", "MSFT", "GOOG"], dates=[DATE], propagate_fn=fn)[DATE]
+        }
         assert results["AAPL"].score == 1.0
         assert results["MSFT"].score == -1.0
         assert results["GOOG"].score == 0.0
@@ -112,26 +118,26 @@ class TestBatchRunner:
         def fn(ticker: str, date: str):
             return {"final_trade_decision": f"Detailed analysis for {ticker}"}, "BUY"
 
-        results = BatchRunner(propagate_fn=fn).run(["AAPL"], "2024-01-01")
+        results = run_batch(tickers=["AAPL"], dates=[DATE], propagate_fn=fn)[DATE]
         assert results[0].decision_text == "Detailed analysis for AAPL"
 
     def test_custom_scorer_called_with_signal(self):
         custom_scorer = MagicMock()
         custom_scorer.score.return_value = 0.5
-        fn = self._make_propagate_fn({"AAPL": "BUY"})
-        BatchRunner(propagate_fn=fn, scorer=custom_scorer).run(["AAPL"], "2024-01-01")
+        fn = _make_propagate_fn({"AAPL": "BUY"})
+        run_batch(tickers=["AAPL"], dates=[DATE], propagate_fn=fn, scorer=custom_scorer)
         custom_scorer.score.assert_called_once_with("BUY")
 
     def test_custom_scorer_score_used_in_result(self):
         custom_scorer = MagicMock()
         custom_scorer.score.return_value = 0.75
-        fn = self._make_propagate_fn({"AAPL": "BUY"})
-        results = BatchRunner(propagate_fn=fn, scorer=custom_scorer).run(["AAPL"], "2024-01-01")
+        fn = _make_propagate_fn({"AAPL": "BUY"})
+        results = run_batch(tickers=["AAPL"], dates=[DATE], propagate_fn=fn, scorer=custom_scorer)[DATE]
         assert results[0].score == 0.75
 
     def test_empty_ticker_list_returns_empty(self):
-        fn = self._make_propagate_fn({})
-        results = BatchRunner(propagate_fn=fn).run([], "2024-01-01")
+        fn = _make_propagate_fn({})
+        results = run_batch(tickers=[], dates=[DATE], propagate_fn=fn)[DATE]
         assert results == []
 
     def test_majority_failures_raises_runtime_error(self):
@@ -139,7 +145,27 @@ class TestBatchRunner:
             raise RuntimeError("always fails")
 
         with pytest.raises(RuntimeError, match="analyses failed"):
-            BatchRunner(propagate_fn=always_fail).run(["AAPL", "MSFT"], "2024-01-01")
+            run_batch(tickers=["AAPL", "MSFT"], dates=[DATE], propagate_fn=always_fail)
+
+    def test_multiple_dates_returns_results_per_date(self):
+        d1 = datetime.date(2024, 1, 1)
+        d2 = datetime.date(2024, 1, 8)
+        fn = _make_propagate_fn({"AAPL": "BUY", "MSFT": "SELL"})
+        results = run_batch(tickers=["AAPL", "MSFT"], dates=[d1, d2], propagate_fn=fn)
+        assert d1 in results
+        assert d2 in results
+        assert len(results[d1]) == 2
+        assert len(results[d2]) == 2
+
+    def test_propagate_fn_receives_iso_date_string(self):
+        received_dates: list[str] = []
+
+        def tracking_fn(ticker: str, date: str):
+            received_dates.append(date)
+            return {"final_trade_decision": "BUY"}, "BUY"
+
+        run_batch(tickers=["AAPL"], dates=[DATE], propagate_fn=tracking_fn)
+        assert received_dates == ["2024-01-01"]
 
 
 # ---------------------------------------------------------------------------

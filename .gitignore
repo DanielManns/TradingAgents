@@ -223,3 +223,6 @@ portfolio_data/*/
 
 # Results (local machine only)
 results/
+
+# Eval results / full states logs
+eval_results/
